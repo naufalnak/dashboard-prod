@@ -1,0 +1,441 @@
+// Dashbord-PROD-main
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+  schemas   = ["prod", "shared"]
+}
+
+// & dijalankan dari sisi Dashboard-MTN.
+model Machine {
+  id              Int      @id @default(autoincrement())
+  machine         String   @unique
+  worktimeMachine Float    @default(16) @map("worktime_machine")
+  createdAt       DateTime @default(now())
+  cluster         String   @default("")
+  line            String   @default("")
+  idAssetMachine  String   @default("") @map("id_asset_machine")
+  brandMachine    String   @default("") @map("brand_machine")
+  powerMachine    String   @default("") @map("power_machine")
+  shift           String   @default("")
+  typeMachine     String   @default("") @map("type_machine")
+  yearMachine     String?  @map("year_machine")
+  active          Boolean  @default(false)
+
+  prosesRows     MasterProses[]
+  reworkRows     PartReworkEntry[]
+
+  @@map("Machine")
+  @@schema("shared")
+}
+
+model Admin {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  role         String   @default("maintenance") // maintenance | produksi
+  createdAt    DateTime @default(now())
+
+  @@schema("shared")
+}
+
+// Master data relasional — dikelola lewat menu "Master Data" di dashboard
+// (bukan lagi lewat Supabase Table Editor langsung, supaya relasinya utuh).
+// Alur: Group Head → Cluster → Part Name → Proses (+ Cycle Time, Line
+// Produksi, Mesin, Man Power). Cycle Time ikut Proses, bukan Part Name --
+// satu Part Name bisa punya beberapa Proses dengan Cycle Time berbeda
+// (contoh: Evaporator 2230 punya 2 proses beda cycle time). Waktu Efektif
+// tetap input manual.
+model MasterCluster {
+  id      Int    @id @default(autoincrement())
+  cluster String @map("CLUSTER")
+
+  groupHeads   MasterGroupHead[]
+  partNames    MasterPartName[]
+  produksiRows ProduksiHarian[]
+
+  @@map("CLUSTER")
+  @@schema("prod")
+}
+
+// 1 Group Head → 1 Cluster.
+// clusterId: FK opsional ke CLUSTER.id, ditambahkan sebagai kolom baru di
+// samping kolom teks `cluster` yang sudah ada (bukan pengganti) supaya
+// relasinya kelihatan sebagai foreign key asli di Supabase tanpa mengubah
+// cara aplikasi baca/tulis data yang sudah ada.
+model MasterGroupHead {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  cluster   String
+  clusterId Int?     @map("cluster_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  clusterMaster MasterCluster?   @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  manPowerRoster MasterManPower[]
+  produksiRows  ProduksiHarian[]
+  reworkRows    PartReworkEntry[]
+
+  @@map("MasterGroupHead")
+  @@schema("prod")
+}
+
+// 1 Cluster → banyak Part Name.
+model MasterPartName {
+  id        Int      @id @default(autoincrement())
+  partName  String   @unique @map("part_name")
+  cluster   String
+  clusterId Int?     @map("cluster_id")
+  price     Float    @default(0) // harga per pcs, dipakai untuk laporan Material Reject (Rp)
+  idCode    String?  @map("id_code") // kode part dari Surat Perintah Kerja, mis. "D.FG.00126" -- ganti Harga di form Master Data Part Name & Proses (Harga tetap ada di DB untuk laporan Material Reject, cuma tidak diedit lewat sini lagi)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  clusterMaster MasterCluster?   @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  prosesRows    MasterProses[]
+  produksiRows  ProduksiHarian[]
+  problemRows   ProblemLog[]
+  rejectionRows RejectionEntry[]
+  reworkRows    PartReworkEntry[]
+
+  @@map("MasterPartName")
+  @@schema("prod")
+}
+
+// Daftar kriteria/jenis cacat NG (mis. "cacat gores", "champer over",
+// "setting", "boring b", dll) -- dikelola lewat Master Data, dipilih saat
+// input Rejection supaya kategorinya konsisten (bukan ketik bebas).
+model MasterKriteriaNg {
+  id        Int      @id @default(autoincrement())
+  nama      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  rejectionRows RejectionEntry[]
+
+  @@map("MasterKriteriaNg")
+  @@schema("prod")
+}
+
+// 1 Group Head → banyak Man Power (anak buahnya). name unik secara global
+// (satu orang cuma satu baris) supaya pindah shift/tempat tinggal edit
+// field groupHead-nya, bukan bikin baris baru.
+model MasterManPower {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  groupHead   String   @map("group_head")
+  groupHeadId Int?     @map("group_head_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  groupHeadMaster MasterGroupHead? @relation(fields: [groupHeadId], references: [id], onDelete: SetNull)
+  produksiRows    ProduksiHarian[]
+  overtimeRows    OvertimeEntry[]
+
+  @@map("MasterManPower")
+  @@schema("prod")
+}
+
+// Target jam lembur (Overtime), diset per bulan lewat Master Data karena
+// nilainya beda-beda tiap bulan (mis. Juli 2026 = 7000 jam). Dipakai
+// sebagai pembagi buat kartu gauge Overtime di Dashboard (aktual ÷ target
+// x 100%, sama pola dengan AR).
+model MasterOvertimeTarget {
+  id          Int      @id @default(autoincrement())
+  year        Int
+  month       Int      // 1-12
+  targetHours Float    @default(0) @map("target_hours")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([year, month])
+  @@map("MasterOvertimeTarget")
+  @@schema("prod")
+}
+
+// 1 Part Name → banyak Proses. Tiap Proses punya Cycle Time sendiri, dan
+// terhubung ke 1 Line Produksi, 1 Mesin, dan 1 Man Power.
+model MasterProses {
+  id         Int      @id @default(autoincrement())
+  proses     String
+  partName   String   @map("part_name")
+  partNameId Int?     @map("part_name_id")
+  // Cluster milik baris Proses ini sendiri (bukan dibaca dari
+  // MasterPartName) -- supaya mengedit Cluster satu baris Proses tidak
+  // ikut mengubah baris Proses lain yang kebetulan berbagi Part Name yang
+  // sama. Diisi dari Cluster Part Name-nya saat baris ini dibuat, lalu
+  // sepenuhnya independen setelah itu.
+  cluster    String   @default("")
+  line       String   @map("line_produksi")
+  mesin      String
+  // FK opsional ke Machine.id -- diisi lewat resolve nama Mesin (case-
+  // insensitive) ke tabel Machine (shared dgn Dashboard-MTN) saat baris
+  // Proses dibuat/diedit lewat /master-proses & /master-proses-update,
+  // sama pola dengan partNameId dkk. Nama Mesin TIDAK wajib cocok dengan
+  // tabel Machine (null kalau belum ada yang cocok) -- lihat komentar di
+  // endpoint tsb.
+  machineId  Int?     @map("machine_id")
+  manPower   String   @map("man_power")
+  cycleTime  Float    @default(0) @map("cycle_time")
+  // Proses Akhir/Finish untuk Part Name ini -- satu Part Name bisa punya
+  // banyak Proses (Milling, Boring, dst), tapi cuma satu yang jadi acuan
+  // "Total OK" buat Input Rejection (lihat RejectionEntry.totalOk).
+  // Ditandai manual lewat Master Data (menyalakan ini di satu baris
+  // Proses otomatis mematikannya di baris Proses lain yang berbagi Part
+  // Name yang sama -- lihat endpoint /master-proses & /master-proses-update).
+  isFinishProses Boolean @default(false) @map("is_finish_proses")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  partNameMaster MasterPartName?  @relation(fields: [partNameId], references: [id], onDelete: SetNull)
+  machineMaster  Machine?         @relation(fields: [machineId], references: [id], onDelete: SetNull)
+  produksiRows   ProduksiHarian[]
+
+  // Sengaja TIDAK ada @@unique([proses, partName]) lagi (dilepas
+  // 2026-08-13) -- satu Part Name+Proses sekarang boleh punya lebih dari
+  // satu baris (mis. beberapa pilihan Mesin), bukan otomatis "dihitung 1"
+  // seperti sebelumnya. Lihat migration 20260813000000_drop_proses_partname_unique.
+  @@map("MasterProses")
+  @@schema("prod")
+}
+
+// Resume Control Harian Produksi — satu baris per Part + Proses + Mesin per
+// hari/shift, diisi via halaman /rmo (form publik tanpa login).
+// Struktur & rumus AR/AVB/PERF/YIELD/OEE mengikuti format Excel existing.
+model ProduksiHarian {
+  id             Int      @id @default(autoincrement())
+  tanggal        DateTime
+  waktu          String?                                        // jam input, format HH:MM
+  shift          String
+  cluster        String
+  clusterId      Int?     @map("cluster_id")
+  line           String   @map("line_produksi")
+  grupHead       String?  @map("grup_head")
+  grupHeadId     Int?     @map("grup_head_id")
+
+  noLot          String?  @map("no_lot")
+  partName       String   @map("part_name")
+  partNameId     Int?     @map("part_name_id")
+  partNumber     String?  @map("part_number")
+  proses         String
+  prosesId       Int?     @map("proses_id")
+  mesin          String
+  manPower       String?  @map("man_power")
+  manPowerId     Int?     @map("man_power_id")
+  cycleTime      Float    @default(0) @map("cycle_time")       // detik/pcs
+  waktuEfektif   Float    @default(0) @map("waktu_efektif")    // jam
+  plan           Int      @default(0)
+
+  ok1            Int      @default(0)
+  ok2            Int      @default(0)
+  rework         Int      @default(0) @map("rwk")
+  reject         Int      @default(0) @map("rjct")
+
+  breakdownMesin Float    @default(0) @map("breakdown_mesin")  // menit
+  jenisProblem   String?  @map("jenis_problem")                // 4M+1E: Machine|Material|Method|Man|Environment
+  lostTime       Float    @default(0) @map("lost_time")        // menit
+  keterangan     String?
+
+  // Link EKSPLISIT (bukan tebak-tebakan dari kecocokan field) antar baris
+  // yang berasal dari satu submit multi-Mesin -- RC Harian input mode
+  // centang-banyak-Mesin, atau "+ Tambah Mesin" di Data Produksi (lihat
+  // createProduksiHarian/updateProduksiHarian). Semua baris dalam satu
+  // batch berbagi UUID yang sama di sini; null untuk baris biasa (1
+  // Mesin, bukan bagian dari batch apa pun).
+  batchId        String?  @map("batch_id")
+
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  clusterMaster  MasterCluster?   @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  grupHeadMaster MasterGroupHead? @relation(fields: [grupHeadId], references: [id], onDelete: SetNull)
+  partNameMaster MasterPartName?  @relation(fields: [partNameId], references: [id], onDelete: SetNull)
+  prosesMaster   MasterProses?    @relation(fields: [prosesId], references: [id], onDelete: SetNull)
+  manPowerMaster MasterManPower?  @relation(fields: [manPowerId], references: [id], onDelete: SetNull)
+  // Baris Problem Produksi yang otomatis dibuat/disinkron dari baris ini
+  // (kalau Loss Time/Breakdown Mesin diisi) -- lihat produksiHarianId di
+  // model ProblemLog & syncLinkedProblemLog di produksi.service.js.
+  problemLogRow  ProblemLog?
+
+  @@index([tanggal])
+  @@index([clusterId])
+  @@index([grupHeadId])
+  @@index([partNameId])
+  @@index([prosesId])
+  @@index([manPowerId])
+  @@index([batchId])
+  @@map("ProduksiHarian")
+  @@schema("shared")
+}
+
+// Log problem/root-cause untuk kasus AR/produksi rendah — ditampilkan di
+// halaman detail AR (tabel Problem, Root Cause, Temporary/Permanent Action).
+model ProblemLog {
+  id                Int       @id @default(autoincrement())
+  tanggal           DateTime? // tanggal produksi saat problem terjadi (ikut form RC Harian)
+  line              String?   @map("line_produksi")
+  mesin             String?   // ikut form RC Harian, dipakai Dashboard-MTN buat filter jenisProblem "Machine"
+  partName          String?   @map("part_name")
+  partNameId        Int?      @map("part_name_id")
+  problem           String
+  jenisProblem      String?   @map("jenis_problem") // 4M+1E + Setting & Tool
+  rootCause         String?   @map("root_cause")
+  temporaryAction   String?   @map("temporary_action")
+  permanentAction   String?   @map("permanent_action")
+  dueDate           DateTime? @map("due_date")
+  status            String    @default("open") // open | in_progress | closed
+  notes             String?
+  closedAt          DateTime? @map("closed_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  // Loss Time & Breakdown Mesin (menit) -- disalin dari ProduksiHarian saat
+  // baris ini otomatis dibuat/disinkron karena Loss Time/Breakdown Mesin
+  // diisi di RC Harian Produksi atau Data Produksi (lihat produksiHarianId
+  // di bawah & syncLinkedProblemLog di src/services/produksi.service.js).
+  lostTime          Float     @default(0) @map("lost_time")
+  breakdownMesin    Float     @default(0) @map("breakdown_mesin")
+  // Baris ProduksiHarian sumber Loss Time/Breakdown Mesin ini (kalau baris
+  // ini otomatis dibuat/disinkron dari sana) -- @unique supaya satu baris
+  // ProduksiHarian cuma pernah punya SATU baris ProblemLog terhubung.
+  // Baris ProblemLog yang dibuat manual lewat menu Problem Produksi
+  // sendiri (bukan dari form input produksi) punya produksiHarianId null.
+  produksiHarianId  Int?      @unique @map("produksi_harian_id")
+
+  partNameMaster    MasterPartName? @relation(fields: [partNameId], references: [id], onDelete: SetNull)
+  produksiHarianRow ProduksiHarian? @relation(fields: [produksiHarianId], references: [id], onDelete: SetNull)
+
+  @@index([tanggal])
+  @@index([partNameId])
+  @@index([jenisProblem])
+  @@map("ProblemLog")
+  @@schema("shared")
+}
+
+// Notifikasi antar-user (mis. "Problem sudah Closed" ke user Grup Head
+// tertentu) -- disimpan di DB (bukan cuma state lokal di browser) supaya
+// tetap muncul lintas sesi/perangkat buat user yang dituju. usernames &
+// readBy disimpan sebagai daftar dipisah koma (volume kecil, tidak perlu
+// tabel relasi terpisah).
+model Notification {
+  id        Int      @id @default(autoincrement())
+  usernames String                              // daftar username tujuan, dipisah koma
+  message   String
+  link      String?                             // key halaman tujuan saat notifikasi diklik, mis. "problemlog"
+  readBy    String   @default("") @map("read_by") // daftar username yang sudah membaca, dipisah koma
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("Notification")
+  @@schema("prod")
+}
+
+// Default Waktu Efektif (jam) per Shift -- dikelola lewat Master Data,
+// dipakai buat auto-isi field Waktu Efektif di form RC Harian Produksi
+// begitu Shift dipilih (tetap bisa diketik ulang manual; nilai akhir
+// yang tersimpan adalah apa pun yang ada di field itu saat Simpan).
+model MasterShiftHours {
+  id           Int    @id @default(autoincrement())
+  shift        String @unique
+  defaultHours Float  @default(0) @map("default_hours")
+
+  @@map("MasterShiftHours")
+  @@schema("prod")
+}
+
+// Input Rejection/Material NG -- terpisah dari ProduksiHarian karena
+// dimensinya beda (per Part Name + harga, bukan per Proses/Mesin/Line).
+// Reject Ratio & Total Proses dihitung saat baca (bukan disimpan) supaya
+// selalu konsisten kalau Total OK/LMR diedit belakangan.
+model RejectionEntry {
+  id           Int      @id @default(autoincrement())
+  tanggal      DateTime
+  waktu        String?                              // jam input, format HH:MM
+  cluster      String                                // otomatis dari Part Name
+  partName     String   @map("part_name")
+  partNameId   Int?     @map("part_name_id")
+  price        Float    @default(0)                  // snapshot harga/pcs saat input (Rp)
+  totalOk      Int      @default(0) @map("total_ok")  // pcs
+  totalLmr     Int      @default(0) @map("total_lmr") // pcs -- jumlah NG/reject
+  kriteriaNg   String?  @map("kriteria_ng")
+  kriteriaNgId Int?     @map("kriteria_ng_id")
+  keterangan   String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  partNameMaster   MasterPartName?   @relation(fields: [partNameId], references: [id], onDelete: SetNull)
+  kriteriaNgMaster MasterKriteriaNg? @relation(fields: [kriteriaNgId], references: [id], onDelete: SetNull)
+
+  @@index([tanggal])
+  @@index([partNameId])
+  @@index([kriteriaNgId])
+  @@map("RejectionEntry")
+  @@schema("prod")
+}
+
+// Input Overtime/Lembur -- terpisah dari ProduksiHarian, per Man Power
+// (bukan per Proses/Mesin/Line). Cluster & Grup Head diselesaikan &
+// disnapshot di server saat input (dari roster Man Power -> Grup Head ->
+// Cluster), sama pola dengan Cluster otomatis di RejectionEntry, supaya
+// kartu ring per-Cluster & donut per-Grup-Head di Detail Overtime bisa
+// dihitung langsung dari baris ini tanpa join berulang.
+model OvertimeEntry {
+  id           Int      @id @default(autoincrement())
+  tanggal      DateTime
+  waktu        String?                              // jam input, format HH:MM
+  manPower     String?  @map("man_power")
+  manPowerId   Int?     @map("man_power_id")
+  groupHead    String?  @map("group_head")           // otomatis dari Man Power
+  cluster      String?                                // otomatis dari Grup Head Man Power
+  durasiJam    Float    @default(0) @map("durasi_jam") // jam lembur
+  keterangan   String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  manPowerMaster MasterManPower? @relation(fields: [manPowerId], references: [id], onDelete: SetNull)
+
+  @@index([tanggal])
+  @@index([manPowerId])
+  @@map("OvertimeEntry")
+  @@schema("prod")
+}
+
+// Data Pengerjaan Part Rework -- log terpisah dari ProduksiHarian.rework
+// (yang cuma angka RWK di RC Harian Produksi biasa; field itu TETAP ada,
+// TIDAK diganti). Diisi via tab "Rework" di halaman publik /lhp, sama pola
+// dengan Input Rejection/Overtime. Cluster diselesaikan & disnapshot di
+// server dari roster Grup Head saat input (sama pola dengan
+// OvertimeEntry.cluster) supaya bisa difilter per-Cluster tanpa join
+// berulang.
+model PartReworkEntry {
+  id               Int       @id @default(autoincrement())
+  tanggalDitemukan DateTime  @map("tanggal_ditemukan")
+  noLotOriginal    String?   @map("no_lot_original")
+  tanggalRepair    DateTime  @map("tanggal_repair")
+  // Auto-generated server-side dari tanggalRepair, format DDMMYYYY + "R"
+  // (mis. 1 Agustus 2020 -> "01082020R") -- lihat POST /part-rework &
+  // /part-rework-update, tidak diketik manual oleh operator.
+  noLotRework      String    @map("no_lot_rework")
+  partName         String    @map("part_name")
+  partNameId       Int?      @map("part_name_id")
+  kriteriaRework   String?   @map("kriteria_rework")
+  metodeRework     String?   @map("metode_rework")
+  mesin            String?
+  machineId        Int?      @map("machine_id")
+  picRework        String?   @map("pic_rework")
+  grupHead         String?   @map("group_head")
+  grupHeadId       Int?      @map("group_head_id")
+  cluster          String?   // otomatis dari roster Grup Head, sama pola OvertimeEntry.cluster
+  totalRework      Int       @default(0) @map("total_rework")
+  totalOk          Int       @default(0) @map("total_ok")
+  totalReject      Int       @default(0) @map("total_reject")
+  metodeCheck      String?   @map("metode_check")
+  tanggalCheck     DateTime? @map("tanggal_check")
+  picCheck         String?   @map("pic_check")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  partNameMaster MasterPartName?  @relation(fields: [partNameId], references: [id], onDelete: SetNull)
+  grupHeadMaster MasterGroupHead? @relation(fields: [grupHeadId], references: [id], onDelete: SetNull)
+  machineMaster  Machine?         @relation(fields: [machineId], references: [id], onDelete: SetNull)
+
+  @@index([tanggalDitemukan])
+  @@index([tanggalRepair])
+  @@index([partNameId])
+  @@index([grupHeadId])
+  @@index([machineId])
+  @@map("PartReworkEntry")
+  @@schema("prod")
+}

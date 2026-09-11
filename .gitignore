@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.local
+*.log
+PG Local.session.sql
+web/node_modules/
+web/dist/
+.deploy-tokens.json
+.playwright-cli/

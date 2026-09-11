@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: dashboard-mtn
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build && npm install --prefix web && npm run build --prefix web
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: NODE_VERSION
+        value: 20.18.0
