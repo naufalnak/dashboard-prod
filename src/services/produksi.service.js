@@ -453,7 +453,11 @@ async function getSummary(query) {
 // AR rata-rata per Cluster (AD/BC/EF/FI) dalam periode terpilih -- untuk
 // pie chart drill-down AR di dashboard. Rata-rata polos dari AR tiap
 // baris, sama pola dengan footer "PENCAPAIAN RATA-RATA" di tabel Data
-// Produksi.
+// Produksi. `volume` (total Ok+Rework+Reject Cluster itu) ikut
+// dikembalikan supaya ukuran slice pie chart di frontend bisa
+// proporsional ke kontribusi produksi Cluster itu -- AR sendiri persen
+// per Cluster (tidak otomatis jadi 100% kalau dijumlah semua Cluster),
+// jadi tidak bisa langsung dipakai sebagai ukuran slice.
 async function getArByCluster(query) {
   const { start, end } = getPeriodRange(query.period, query.date, query.start, query.end);
   const clusterFilter = query.cluster ? { cluster: query.cluster } : {};
@@ -462,13 +466,37 @@ async function getArByCluster(query) {
 
   const byCluster = {};
   for (const r of rows) {
-    if (!byCluster[r.cluster]) byCluster[r.cluster] = [];
-    byCluster[r.cluster].push(rowMetrics(r).ar);
+    if (!byCluster[r.cluster]) byCluster[r.cluster] = { arValues: [], volume: 0 };
+    byCluster[r.cluster].arValues.push(rowMetrics(r).ar);
+    byCluster[r.cluster].volume += rowMetrics(r).totalProses;
   }
-  return Object.entries(byCluster).map(([cluster, arValues]) => ({
+  return Object.entries(byCluster).map(([cluster, v]) => ({
     cluster,
-    ar: roundTo(arValues.reduce((s, v) => s + v, 0) / arValues.length),
+    ar: roundTo(v.arValues.reduce((s, x) => s + x, 0) / v.arValues.length),
+    volume: v.volume,
   }));
+}
+
+// AR rata-rata per Shift dalam satu Cluster (atau semua Cluster kalau
+// tidak dikirim) -- dipakai popup drill-down saat slice Cluster di pie
+// chart AR diklik (lihat getArByCluster). Sama pola perhitungan, cuma
+// dikelompokkan per Shift (Master Data > Shift) bukan per Cluster.
+async function getArByShift(query) {
+  const { start, end } = getPeriodRange(query.period, query.date, query.start, query.end);
+  const clusterFilter = query.cluster ? { cluster: query.cluster } : {};
+  const rows = await prisma.produksiHarian.findMany({ where: { tanggal: { gte: start, lte: end }, ...clusterFilter } });
+
+  const byShift = {};
+  for (const r of rows) {
+    const key = r.shift || '—';
+    if (!byShift[key]) byShift[key] = [];
+    byShift[key].push(rowMetrics(r).ar);
+  }
+  return Object.entries(byShift).map(([shift, arValues]) => ({
+    shift,
+    ar: roundTo(arValues.reduce((s, v) => s + v, 0) / arValues.length),
+    entries: arValues.length,
+  })).sort((a, b) => a.shift.localeCompare(b.shift));
 }
 
 // AR rata-rata per Line Produksi -- untuk ranking 5 Line AR
@@ -670,6 +698,7 @@ module.exports = {
   getOkForPart,
   getSummary,
   getArByCluster,
+  getArByShift,
   getArByLine,
   getJenisProblemStats,
   getDowntimeAudit,

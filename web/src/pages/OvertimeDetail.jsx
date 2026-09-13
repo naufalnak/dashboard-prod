@@ -146,7 +146,7 @@ export default function OvertimeDetail() {
           )}
         </div>
 
-        <div className="card">
+        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-header">
             <div className="card-title">Tren Overtime {clusterLabel}</div>
           </div>
@@ -154,10 +154,10 @@ export default function OvertimeDetail() {
             <SkeletonBlock height={220} />
           ) : (
             <LineTrendChart
-              title=""
+              bare
               data={trend}
               valueKey="overtime"
-              color="#0e5a52"
+              color="var(--accent)"
               unit="jam"
               showMovingAvg
               movingAvgColor="var(--blue)"

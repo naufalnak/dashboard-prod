@@ -72,6 +72,15 @@ router.get('/ar-by-line', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── GET /api/ar-by-shift ────────────────────────────────
+// AR rata-rata per Shift dalam satu Cluster (query.cluster) -- dipakai
+// popup drill-down saat slice Cluster di pie chart AR (Detail AR) diklik.
+router.get('/ar-by-shift', requireAuth, async (req, res, next) => {
+  try {
+    res.json(await produksiService.getArByShift(req.query));
+  } catch (err) { next(err); }
+});
+
 // ── GET /api/produksi-harian/jenis-problem-stats ───────
 // Persentase Jenis Problem (4M + 1E) yang diakumulasi dari kolom
 // ProduksiHarian.jenis_problem dalam periode terpilih -- dipakai untuk

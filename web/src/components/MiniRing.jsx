@@ -13,8 +13,20 @@ export default function MiniRing({ label, value, size = 50, color = '#0e5a52', s
   const filled = (v / 100) * circ;
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+      {/* width/height SVG dulu fixed px sama persis dengan `size` -- di
+          kartu yang jadi lebih sempit dari `size` (layar kecil, atau zoom
+          browser tinggi yang mengecilkan grid dalam satuan px CSS), SVG
+          tidak ikut menyempit dan malah overflow lalu terpotong oleh
+          .card{overflow:hidden}. width/height 100% + wrapper maxWidth
+          bikin ring ini menyusut mengikuti ruang yang benar-benar
+          tersedia, `size` cuma jadi batas atas seperti sebelumnya --
+          minWidth jadi batas BAWAH supaya tidak ikut menyusut tanpa batas
+          kalau kartu induknya sendiri jadi sangat sempit (mis. zoom
+          browser ekstrem), ring cukup berhenti di ukuran kecil yang masih
+          wajar dibaca, sisanya boleh sedikit mepet/scroll. */}
+      <div style={{ width: size, maxWidth: '100%', minWidth: Math.max(28, size * 0.45), aspectRatio: '1', flexShrink: 0 }}>
+      <svg width="100%" height="100%" viewBox={`0 0 ${size} ${size}`}>
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(150,155,165,.28)" strokeWidth={strokeW} />
         {v > 0 && (
           <circle
@@ -32,6 +44,7 @@ export default function MiniRing({ label, value, size = 50, color = '#0e5a52', s
           </text>
         )}
       </svg>
+      </div>
       {!showInsideText && (
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>{label}</div>

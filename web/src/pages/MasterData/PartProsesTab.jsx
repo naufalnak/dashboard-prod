@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Trash2, Upload, Pencil, X, ArrowRightLeft, ArrowUpRight, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, Upload, Pencil, X, ArrowRightLeft } from 'lucide-react';
 import { useUI } from '../../contexts/UIContext.jsx';
 import { apiFetch, apiSend } from '../../api.js';
 import { useToast } from '../../contexts/ToastContext.jsx';
@@ -35,303 +35,6 @@ const PP_DEFAULT_WIDTHS = weightsToPercent([
   { key: 'cycleTime', weight: 100 },
   { key: 'jumlahData', weight: 110 },
 ], PP_AKSI_PCT);
-
-const orphanInp = { width: '100%', padding: '7px 10px', fontSize: 12.5, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--s1)', color: 'var(--text)' };
-
-// Part Name yang muncul di data RC Harian Produksi (Supabase) tapi tidak
-// cocok dengan Part Name mana pun yang sekarang ada di Master Data --
-// biasanya nama lama/typo dari sebelum katalog dirapikan, atau memang
-// sudah diganti namanya belakangan. Panel ini membiarkan nama lama itu
-// "disamakan" ke Part Name Master Data yang benar -- backend akan
-// menimpa nama di semua baris historis terkait (Produksi, Rejection,
-// Problem Log) sekaligus, lihat POST /produksi-rename-partname.
-function OrphanPartNamesPanel({ orphans, loading, partNameOptions, logout, showToast, onRenamed }) {
-  const { navigateToDataProduksi } = useUI();
-  const [target, setTarget] = useState({});
-  const [newCluster, setNewCluster] = useState({});
-  const [busyName, setBusyName] = useState(null);
-
-  async function rename(orphanName) {
-    const to = (target[orphanName] || '').trim();
-    if (!to) return;
-    setBusyName(orphanName);
-    try {
-      const r = await apiSend('/produksi-rename-partname', 'POST', { from: orphanName, to }, logout);
-      showToast(`${r.total} baris data diganti dari "${orphanName}" ke "${to}"`, 'green');
-      setTarget((t) => { const n = { ...t }; delete n[orphanName]; return n; });
-      onRenamed();
-    } catch (e) { showToast(e.message, 'red'); }
-    setBusyName(null);
-  }
-
-  // Part Name ini memang belum pernah didaftarkan ke Master Data sama
-  // sekali (bukan typo/variasi dari Part Name lain) -- daftarkan
-  // langsung pakai nama yang sama persis (idempotent, lihat
-  // POST /master-part-name), tanpa perlu rename data historis apa pun
-  // karena namanya memang sudah benar dari awal.
-  async function createNew(o) {
-    const cluster = newCluster[o.partName] || o.cluster;
-    if (!cluster) return;
-    setBusyName(o.partName);
-    try {
-      await apiSend('/master-part-name', 'POST', { part_name: o.partName, cluster }, logout);
-      showToast(`"${o.partName}" berhasil didaftarkan ke Master Data (Cluster ${cluster}) — lanjutkan dengan menambahkan Proses & Proses Akhir`, 'green');
-      setNewCluster((c) => { const n = { ...c }; delete n[o.partName]; return n; });
-      onRenamed();
-    } catch (e) { showToast(e.message, 'red'); }
-    setBusyName(null);
-  }
-
-  if (loading || orphans.length === 0) return null;
-
-  return (
-    <div style={{ border: '1px solid #e0a30c', background: 'rgba(224,163,12,.08)', borderRadius: 8, padding: 14, marginBottom: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
-        <AlertTriangle size={15} style={{ color: '#e0a30c' }} />
-        Part Name Belum Terdaftar di Master Data ({orphans.length})
-      </div>
-      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 12 }}>
-        Nama Part di bawah ini ada di data RC Harian Produksi tapi tidak cocok dengan Part Name mana pun yang sekarang ada di Master Data. Kalau cuma beda ejaan/sudah diganti nama: pilih Part Name Master Data yang benar lalu klik Ganti (menyamakan semua data historisnya). Kalau memang Part Name baru yang belum pernah didaftarkan: pilih Cluster lalu klik Buat Baru.
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 340, overflowY: 'auto' }}>
-        {orphans.map((o) => (
-          <div key={o.partName} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 7, padding: '8px 10px', flexWrap: 'wrap' }}>
-            <div style={{ flex: '0 0 220px', minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={o.partName}>{o.partName}</div>
-              <div style={{ fontSize: 10.5, color: 'var(--muted)' }}>{o.count.toLocaleString()} baris data{o.cluster && ` · biasa Cluster ${o.cluster}`}</div>
-            </div>
-            <button
-              onClick={() => navigateToDataProduksi(o.partName)}
-              className="btn"
-              title="Buka baris RC Harian Produksi yang pakai nama ini, edit manual"
-              style={{ flexShrink: 0, fontSize: 11.5, padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}
-            >
-              Ke Data Produksi <ArrowUpRight size={12} />
-            </button>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 260px', minWidth: 220 }}>
-              <ArrowRightLeft size={13} style={{ color: 'var(--muted)', flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 140 }}>
-                <Combobox
-                  style={orphanInp}
-                  value={target[o.partName] || ''}
-                  options={partNameOptions}
-                  onChange={(v) => setTarget((t) => ({ ...t, [o.partName]: v }))}
-                  placeholder="Gabung ke Part Name yang benar…"
-                />
-              </div>
-              <button
-                disabled={!(target[o.partName] || '').trim() || busyName === o.partName}
-                onClick={() => rename(o.partName)}
-                className="btn primary"
-                style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
-              >
-                {busyName === o.partName ? 'Mengganti…' : 'Ganti'}
-              </button>
-            </div>
-
-            <div style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0 }}>atau</div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-              <select
-                className="form-input"
-                style={{ ...orphanInp, width: 84 }}
-                value={newCluster[o.partName] ?? o.cluster ?? ''}
-                onChange={(e) => setNewCluster((c) => ({ ...c, [o.partName]: e.target.value }))}
-              >
-                <option value="">Cluster…</option>
-                {CLUSTERS.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <button
-                disabled={!(newCluster[o.partName] ?? o.cluster) || busyName === o.partName}
-                onClick={() => createNew(o)}
-                className="btn"
-                title="Daftarkan nama ini apa adanya sebagai Part Name baru di Master Data"
-                style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
-              >
-                {busyName === o.partName ? 'Membuat…' : 'Buat Baru'}
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Baris Proses yang Mesin-nya (data lama, diketik manual sebelum Tabel
-// Machine dipakai sebagai katalog "Semua Mesin") belum cocok satu pun
-// baris di Machine -- Line Produksi baris ini juga ikut tidak akurat
-// (dulu ikut ketikan manual, bukan dari Machine.line). Klik baris buat
-// mencarinya di tabel, lalu klik ikon pensil dan pilih Mesin yang benar
-// dari dropdown (sudah tervalidasi ke Tabel Machine) -- koreksi
-// sesungguhnya sengaja tetap manual oleh admin, bukan ditebak otomatis.
-function MesinMismatchPanel({ items, loading, onFocusPartName }) {
-  if (loading || items.length === 0) return null;
-  return (
-    <div style={{ border: '1px solid #3b82c4', background: 'rgba(59,130,196,.07)', borderRadius: 8, padding: 14, marginBottom: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
-        <AlertTriangle size={15} style={{ color: '#3b82c4' }} />
-        Mesin/Line Belum Sesuai Tabel Machine ({items.length})
-      </div>
-      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 12 }}>
-        Baris Proses di bawah ini Mesin-nya masih data lama (belum cocok dengan katalog "Semua Mesin"), jadi Line Produksi-nya juga ikut belum akurat. Klik salah satu buat mencarinya di tabel, lalu klik ikon pensil dan pilih Mesin yang benar dari dropdown.
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxHeight: 200, overflowY: 'auto' }}>
-        {items.map((it) => (
-          <button
-            key={it.id}
-            onClick={() => onFocusPartName(it.partName)}
-            className="btn"
-            style={{ fontSize: 12, padding: '6px 10px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, textAlign: 'left' }}
-            title={`Mesin saat ini: "${it.mesin || '(kosong)'}", Line: "${it.line || '(kosong)'}"`}
-          >
-            <span style={{ fontWeight: 700 }}>{it.partName} — {it.proses}</span>
-            <span style={{ color: 'var(--muted)', fontSize: 10.5 }}>
-              Mesin: {it.mesin || '—'}
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Part Name yang Total OK Input Rejection-nya tidak akan pernah bisa
-// terhitung: entah belum punya baris Proses sama sekali, atau sudah ada
-// Proses tapi belum ada satu pun yang ditandai Proses Akhir/Finish --
-// Total OK butuh itu buat tahu Proses mana yang jadi acuan jumlah OK.
-// Klik nama Part Name buat mencarinya di tabel (tambahkan Proses/tandai
-// Proses Akhir lewat Edit), ATAU kalau ternyata baris ini cuma variasi
-// ejaan dari Part Name lain yang sudah benar, gabungkan langsung lewat
-// /master-part-name-merge tanpa perlu hapus manual satu-satu.
-function MissingFinishPanel({ items, loading, onFocusPartName, partNameOptions, logout, showToast, onMerged }) {
-  const { navigateToDataProduksi } = useUI();
-  const [mergeTarget, setMergeTarget] = useState({});
-  const [busyName, setBusyName] = useState(null);
-
-  async function merge(fromName) {
-    const to = (mergeTarget[fromName] || '').trim();
-    if (!to) return;
-    setBusyName(fromName);
-    try {
-      const r = await apiSend('/master-part-name-merge', 'POST', { from: fromName, to }, logout);
-      showToast(`"${fromName}" digabung ke "${r.into}" (${r.total} baris data ikut disamakan)`, 'green');
-      setMergeTarget((t) => { const n = { ...t }; delete n[fromName]; return n; });
-      onMerged();
-    } catch (e) { showToast(e.message, 'red'); }
-    setBusyName(null);
-  }
-
-  if (loading || items.length === 0) return null;
-  return (
-    <div style={{ border: '1px solid #c0392b', background: 'rgba(192,57,43,.06)', borderRadius: 8, padding: 14, marginBottom: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
-        <AlertTriangle size={15} style={{ color: '#c0392b' }} />
-        Part Name Belum Punya Proses Akhir/Finish ({items.length})
-      </div>
-      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 12 }}>
-        Total OK di Input Rejection untuk Part Name di bawah ini akan selalu 0 sampai ini dibereskan. Kalau memang Part Name baru: klik namanya untuk mencarinya di tabel, lalu tambahkan Proses (kalau belum ada) atau buka Edit pada Proses yang benar dan centang Proses Akhir/Finish. Kalau ternyata cuma variasi ejaan dari Part Name lain yang sudah benar: pilih Part Name yang benar lalu Gabung.
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 340, overflowY: 'auto' }}>
-        {items.map((it) => (
-          <div key={it.partName} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 7, padding: '8px 10px', flexWrap: 'wrap' }}>
-            <button
-              onClick={() => onFocusPartName(it.partName)}
-              className="btn"
-              style={{ flex: '0 0 220px', minWidth: 0, fontSize: 12, padding: '6px 10px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, textAlign: 'left' }}
-              title={it.prosesCount === 0 ? 'Belum ada Proses sama sekali' : `Ada ${it.prosesCount} Proses, belum ada yang ditandai Proses Akhir`}
-            >
-              <span style={{ fontWeight: 700 }}>{it.partName}</span>
-              <span style={{ color: 'var(--muted)', fontSize: 10.5 }}>
-                {it.prosesCount === 0 ? 'Belum ada Proses' : `${it.prosesCount} Proses, belum ada Finish`}
-              </span>
-            </button>
-            <button
-              onClick={() => navigateToDataProduksi(it.partName)}
-              className="btn"
-              title="Buka baris RC Harian Produksi yang pakai nama ini, edit manual"
-              style={{ flexShrink: 0, fontSize: 11.5, padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}
-            >
-              Ke Data Produksi <ArrowUpRight size={12} />
-            </button>
-            <ArrowRightLeft size={13} style={{ color: 'var(--muted)', flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 160 }}>
-              <Combobox
-                style={orphanInp}
-                value={mergeTarget[it.partName] || ''}
-                options={partNameOptions.filter((p) => p !== it.partName)}
-                onChange={(v) => setMergeTarget((t) => ({ ...t, [it.partName]: v }))}
-                placeholder="Gabung ke Part Name yang benar…"
-              />
-            </div>
-            <button
-              disabled={!(mergeTarget[it.partName] || '').trim() || busyName === it.partName}
-              onClick={() => merge(it.partName)}
-              className="btn primary"
-              style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
-            >
-              {busyName === it.partName ? 'Menggabung…' : 'Gabung'}
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Part Name yang tidak punya Proses sama sekali DAN tidak dipakai data
-// historis manapun (ProduksiHarian/Rejection/ProblemLog/Rework) -- sisa
-// entri lama yang sudah diganti/dihapus dari data lapangan, bukan Part
-// Name baru yang perlu dilengkapi. Beda dari MissingFinishPanel yang
-// khusus Part Name yang MASIH punya data tapi belum lengkap Proses
-// Akhir-nya. Hapus dicek ulang di backend (/master-part-name-delete)
-// supaya tidak bisa kehapus kalau ternyata masih ada datanya.
-function UnusedPartNamesPanel({ items, loading, logout, showToast, onDeleted }) {
-  const confirm = useConfirm();
-  const [busyId, setBusyId] = useState(null);
-
-  async function remove(item) {
-    if (!(await confirm(`Hapus Part Name "${item.partName}" dari Master Data? Part Name ini tidak punya Proses maupun data historis apa pun.`))) return;
-    setBusyId(item.id);
-    try {
-      await apiSend('/master-part-name-delete', 'POST', { id: item.id }, logout);
-      showToast(`"${item.partName}" berhasil dihapus`, 'green');
-      onDeleted();
-    } catch (e) { showToast(e.message, 'red'); }
-    setBusyId(null);
-  }
-
-  if (loading || items.length === 0) return null;
-  return (
-    <div style={{ border: '1px solid var(--border)', background: 'var(--s2)', borderRadius: 8, padding: 14, marginBottom: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
-        <AlertTriangle size={15} style={{ color: 'var(--muted)' }} />
-        Part Name Tidak Terpakai ({items.length})
-      </div>
-      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 12 }}>
-        Part Name di bawah ini tidak punya Proses maupun data historis apa pun (Produksi/Rejection/Problem Log/Rework) -- biasanya sisa nama lama yang sudah diganti/dihapus, bukan bagian dari Data Produksi. Aman dihapus kalau memang bukan Part Name baru yang belum sempat dilengkapi.
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxHeight: 200, overflowY: 'auto' }}>
-        {items.map((it) => (
-          <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 7, padding: '6px 6px 6px 10px' }}>
-            <span style={{ fontSize: 12, fontWeight: 700 }}>{it.partName}</span>
-            <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{it.cluster}</span>
-            <button
-              disabled={busyId === it.id}
-              onClick={() => remove(it)}
-              className="btn"
-              style={{ flexShrink: 0, color: 'var(--red)', fontSize: 11.5, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
-              title="Hapus Part Name ini"
-            >
-              <Trash2 size={12} /> {busyId === it.id ? 'Menghapus…' : 'Hapus'}
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 // Daftar input Mesin yang bisa ditambah/dihapus baris ("+ Tambah Mesin") --
 // dipakai bersama oleh AddProsesModal dan EditProsesModal supaya kedua
@@ -855,7 +558,7 @@ function ImportProsesModal({ logout, onClose, onImported }) {
           <div style={{ fontSize: 12, marginBottom: 12, maxHeight: 180, overflowY: 'auto', background: 'var(--s2)', borderRadius: 8, padding: 10 }}>
             <div style={{ color: 'var(--green)', fontWeight: 700 }}>{result.imported} dari {result.total} baris berhasil diimport.</div>
             {result.unmatchedMesin > 0 && (
-              <div style={{ color: '#e0a30c', marginTop: 4 }}>
+              <div style={{ color: 'var(--yellow)', marginTop: 4 }}>
                 {result.unmatchedMesin} di antaranya Mesin-nya belum cocok Tabel Machine — cek panel "Mesin/Line Belum Sesuai Tabel Machine" di atas untuk mengoreksinya satu per satu.
               </div>
             )}
@@ -885,6 +588,7 @@ function ImportProsesModal({ logout, onClose, onImported }) {
 export default function PartProsesTab({ proses, partNames, loading, onChanged, logout, legacy = { proses: [], mesin: [], manPower: [], partNames: [] }, readOnly = false }) {
   const showToast = useToast();
   const confirm = useConfirm();
+  const { partProsesQuery, setPartProsesQuery } = useUI();
   // Klik baris (bukan tombol Edit/Hapus/bintang) buka drawer detail
   // read-only, sama pola dengan ProduksiRowDrawer di Data Produksi. Klik
   // pensil Edit buka EditProsesModal (bisa diubah, kotak di tengah layar)
@@ -900,25 +604,8 @@ export default function PartProsesTab({ proses, partNames, loading, onChanged, l
   const { widths, startResize } = useColumnWidths(PP_DEFAULT_WIDTHS, scrollRef);
 
   // Jumlah baris RC Harian Produksi per Part Name+Proses -- kolom "Jumlah
-  // Data" di tabel, dan daftar Part Name yang muncul di data produksi
-  // historis tapi tidak (lagi) cocok dengan Part Name mana pun di Master
-  // Data -- biasanya nama lama/typo sebelum katalog dirapikan, atau nama
-  // Part Name-nya sudah diganti belakangan di Master Data.
+  // Data" di tabel.
   const [counts, setCounts] = useState([]);
-  const [orphans, setOrphans] = useState([]);
-  const [orphanLoading, setOrphanLoading] = useState(true);
-  const [missingFinish, setMissingFinish] = useState([]);
-  const [missingFinishLoading, setMissingFinishLoading] = useState(true);
-  // Part Name yang tidak punya Proses sama sekali DAN tidak dipakai data
-  // historis manapun -- sisa entri lama, tidak termasuk Data Produksi
-  // (beda dari missingFinish yang MASIH punya data tapi belum lengkap).
-  const [unused, setUnused] = useState([]);
-  const [unusedLoading, setUnusedLoading] = useState(true);
-  // Baris Proses yang Mesin-nya (data lama, sebelum Tabel Machine dipakai
-  // sebagai katalog) belum cocok satu pun baris di Machine -- perlu
-  // dikoreksi manual oleh admin (lihat MesinMismatchPanel).
-  const [mesinMismatch, setMesinMismatch] = useState([]);
-  const [mesinMismatchLoading, setMesinMismatchLoading] = useState(true);
   // Katalog Mesin (tabel Machine, shared dgn Dashboard-MTN) -- Mesin di
   // form Proses WAJIB pilih dari sini (bukan ketik bebas lagi). Line
   // Produksi TIDAK lagi ikut otomatis dari Machine.line -- diisi manual
@@ -928,16 +615,17 @@ export default function PartProsesTab({ proses, partNames, loading, onChanged, l
   const loadCounts = useCallback(() => {
     apiFetch('/produksi-partname-counts', [], logout).then(setCounts);
     apiFetch('/machines', [], logout).then(setMachines);
-    setOrphanLoading(true);
-    apiFetch('/produksi-orphan-partnames', [], logout).then((d) => { setOrphans(d); setOrphanLoading(false); });
-    setMissingFinishLoading(true);
-    apiFetch('/master-partname-missing-finish', [], logout).then((d) => { setMissingFinish(d); setMissingFinishLoading(false); });
-    setUnusedLoading(true);
-    apiFetch('/master-partname-unused', [], logout).then((d) => { setUnused(d); setUnusedLoading(false); });
-    setMesinMismatchLoading(true);
-    apiFetch('/master-proses-mesin-mismatch', [], logout).then((d) => { setMesinMismatch(d); setMesinMismatchLoading(false); });
   }, [logout]);
   useEffect(() => { loadCounts(); }, [loadCounts]);
+  // Datang dari halaman Validasi Data ("Mesin/Line Belum Sesuai Tabel
+  // Machine" / "Part Name Belum Punya Proses Akhir/Finish") -- kotak
+  // pencarian di bawah sudah terisi supaya baris terkait langsung
+  // kelihatan, lalu reset state-nya sama pola dengan dataProduksiQuery.
+  useEffect(() => {
+    if (!partProsesQuery) return;
+    setQuery(partProsesQuery);
+    setPartProsesQuery('');
+  }, [partProsesQuery, setPartProsesQuery]);
   // Ketik-utk-cari (Combobox), TIDAK difilter per Cluster -- data Cluster
   // di Tabel Machine belum dirapikan (banyak masih "Cell AD" dkk, bukan
   // "AD" polos seperti dipakai di sini), jadi filter cluster-exact-match
@@ -1015,44 +703,6 @@ export default function PartProsesTab({ proses, partNames, loading, onChanged, l
 
   return (
     <div className="card">
-      {!readOnly && (
-        <>
-          <MesinMismatchPanel
-            items={mesinMismatch}
-            loading={mesinMismatchLoading}
-            onFocusPartName={setQuery}
-          />
-
-          <MissingFinishPanel
-            items={missingFinish}
-            loading={missingFinishLoading}
-            onFocusPartName={setQuery}
-            partNameOptions={partNames.map((p) => p.partName)}
-            logout={logout}
-            showToast={showToast}
-            onMerged={loadCounts}
-          />
-
-          <UnusedPartNamesPanel
-            items={unused}
-            loading={unusedLoading}
-            logout={logout}
-            showToast={showToast}
-            onDeleted={loadCounts}
-          />
-
-          <OrphanPartNamesPanel
-            orphans={orphans}
-            loading={orphanLoading}
-            partNameOptions={partNames.map((p) => p.partName)}
-            logout={logout}
-            showToast={showToast}
-            onRenamed={loadCounts}
-          />
-
-        </>
-      )}
-
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
         <div style={{ flex: 1 }}>
           <SearchBox value={query} onChange={setQuery} placeholder="Cari Part Name / Proses / Line / Mesin…" />
@@ -1129,7 +779,7 @@ export default function PartProsesTab({ proses, partNames, loading, onChanged, l
                             title="Proses Akhir/Finish -- dipakai sebagai Total OK Input Rejection"
                             style={{
                               flexShrink: 0, fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.03em',
-                              color: '#e0a30c', border: '1px solid #e0a30c', borderRadius: 4, padding: '1px 5px',
+                              color: 'var(--yellow)', border: '1px solid var(--yellow)', borderRadius: 4, padding: '1px 5px',
                             }}
                           >
                             Finish

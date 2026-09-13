@@ -13,7 +13,6 @@ export default function AvailabilityCard({ kpi }) {
   const isOk   = av >= availabilityTarget;
   const isWarn = av >= (availabilityTarget * 0.85) && !isOk;
   const colVar = isOk ? 'var(--green)' : isWarn ? 'var(--yellow)' : 'var(--red)';
-  const colHex = isOk ? '#00d084'      : isWarn ? '#f0a500'        : '#ff4455';
 
   const r    = 66;
   const circ = 2 * Math.PI * r;
@@ -28,29 +27,36 @@ export default function AvailabilityCard({ kpi }) {
         </div>
       </div>
 
-      {/* SVG circle gauge — nilai ditampilkan di stats row, bukan di tengah lingkaran */}
-      <div style={{ textAlign: 'center', padding: '4px 0 8px' }}>
-        <svg width={174} height={174} viewBox="0 0 174 174" style={{ overflow: 'visible' }}>
-          {/* track */}
-          <circle cx={87} cy={87} r={r} fill="none" stroke="var(--s3)" strokeWidth={13} />
-          {/* arc */}
-          <circle
-            cx={87} cy={87} r={r}
-            fill="none"
-            stroke={colHex}
-            strokeWidth={13}
-            strokeLinecap="round"
-            strokeDasharray={`${filled} ${circ}`}
-            transform="rotate(-90 87 87)"
-            style={{ transition: 'stroke-dasharray 1.4s cubic-bezier(.4,0,.2,1)' }}
-          />
-          {/* percentage in center */}
-          <text x={87} y={87} textAnchor="middle" dominantBaseline="middle"
-            fill={colHex}
-            style={{ fontSize: 30, fontWeight: 700, fontFamily: 'Inter,sans-serif', letterSpacing: '-0.5px', fontVariantNumeric: 'tabular-nums' }}>
-            {av.toFixed(1)}%
-          </text>
-        </svg>
+      {/* SVG circle gauge — nilai ditampilkan di stats row, bukan di tengah
+          lingkaran. Wrapper width:174+maxWidth:100% (bukan svg width/height
+          fixed 174px) supaya ring ikut menyusut kalau kartunya lebih sempit
+          dari itu, bukan overflow lalu terpotong .card{overflow:hidden} --
+          minWidth+flexShrink:0 supaya tidak ikut menyusut tanpa batas kalau
+          kartu induknya jadi sangat sempit di zoom ekstrem. */}
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 0 8px' }}>
+        <div style={{ width: 174, maxWidth: '100%', minWidth: 100, aspectRatio: '1', flexShrink: 0 }}>
+          <svg width="100%" height="100%" viewBox="0 0 174 174">
+            {/* track */}
+            <circle cx={87} cy={87} r={r} fill="none" stroke="var(--s3)" strokeWidth={13} />
+            {/* arc */}
+            <circle
+              cx={87} cy={87} r={r}
+              fill="none"
+              stroke={colVar}
+              strokeWidth={13}
+              strokeLinecap="round"
+              strokeDasharray={`${filled} ${circ}`}
+              transform="rotate(-90 87 87)"
+              style={{ transition: 'stroke-dasharray 1.4s cubic-bezier(.4,0,.2,1)' }}
+            />
+            {/* percentage in center */}
+            <text x={87} y={87} textAnchor="middle" dominantBaseline="middle"
+              fill={colVar}
+              style={{ fontSize: 30, fontWeight: 700, fontFamily: 'Inter,sans-serif', letterSpacing: '-0.5px', fontVariantNumeric: 'tabular-nums' }}>
+              {av.toFixed(1)}%
+            </text>
+          </svg>
+        </div>
       </div>
 
       {/* target status */}

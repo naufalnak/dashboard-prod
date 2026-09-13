@@ -21,6 +21,7 @@ import RejectionDetail from './pages/RejectionDetail.jsx';
 import OvertimeDetail from './pages/OvertimeDetail.jsx';
 import Reports from './pages/Reports.jsx';
 import MasterData from './pages/MasterData/index.jsx';
+import DataValidasi from './pages/DataValidasi.jsx';
 import ProblemLogPage from './pages/ProblemLogPage.jsx';
 import DowntimeProduksi from './pages/DowntimeProduksi.jsx';
 import Topbar from './components/layout/Topbar.jsx';
@@ -33,7 +34,7 @@ import DetailPanel from './components/DetailPanel.jsx';
 import WOPanel from './components/WOPanel.jsx';
 import ModalRoot from './components/ModalRoot.jsx';
 
-const PAGES = { dashboard: Dashboard, machines: Machines, dataproduksi: DataProduksi, datarejection: DataRejection, dataovertime: DataOvertime, datarework: DataRework, ardetail: ARDetail, oeedetail: OEEDetail, rejectiondetail: RejectionDetail, overtimedetail: OvertimeDetail, reports: Reports, masterdata: MasterData, problemlog: ProblemLogPage, downtimeproduksi: DowntimeProduksi };
+const PAGES = { dashboard: Dashboard, machines: Machines, dataproduksi: DataProduksi, datarejection: DataRejection, dataovertime: DataOvertime, datarework: DataRework, ardetail: ARDetail, oeedetail: OEEDetail, rejectiondetail: RejectionDetail, overtimedetail: OvertimeDetail, reports: Reports, masterdata: MasterData, datavalidasi: DataValidasi, problemlog: ProblemLogPage, downtimeproduksi: DowntimeProduksi };
 
 function Shell() {
   const { page, closeModal, setNotifOpen, closeDetail, closeWODetail, presentMode, togglePresentMode, detailWO, sidebarOpen } = useUI();

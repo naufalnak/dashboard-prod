@@ -144,7 +144,7 @@ export default function RejectionDetail() {
           )}
         </div>
 
-        <div className="card">
+        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-header">
             <div className="card-title">Tren Rejection {clusterLabel}</div>
           </div>
@@ -152,11 +152,11 @@ export default function RejectionDetail() {
             <SkeletonBlock height={220} />
           ) : (
             <LineTrendChart
-              title=""
+              bare
               data={trendWithTarget}
               valueKey="rejection"
               targetKey="target"
-              color="#d9534f"
+              color="var(--red)"
               unit="%"
               showMovingAvg
               movingAvgColor="var(--blue)"

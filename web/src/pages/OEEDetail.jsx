@@ -164,7 +164,7 @@ export default function OEEDetail() {
           )}
         </div>
 
-        <div className="card">
+        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-header">
             <div className="card-title">Tren OEE {clusterLabel}</div>
           </div>
@@ -172,11 +172,11 @@ export default function OEEDetail() {
             <SkeletonBlock height={220} />
           ) : (
             <LineTrendChart
-              title=""
+              bare
               data={trendWithTarget}
               valueKey="oee"
               targetKey="target"
-              color="#0e5a52"
+              color="var(--accent)"
               unit="%"
               showMovingAvg
               movingAvgColor="var(--blue)"

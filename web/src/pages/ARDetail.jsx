@@ -5,7 +5,8 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { apiFetch } from '../api.js';
 import MiniRing from '../components/MiniRing.jsx';
 import LineTrendChart from '../components/charts/LineTrendChart.jsx';
-import { CLUSTER_COLORS } from '../components/ClusterBarList.jsx';
+import ArClusterDonut from '../components/charts/ArClusterDonut.jsx';
+import ArShiftPopup from '../components/ArShiftPopup.jsx';
 import HorizontalBarList from '../components/HorizontalBarList.jsx';
 import JenisProblemChart from '../components/charts/JenisProblemChart.jsx';
 import PeriodPicker from '../components/PeriodPicker.jsx';
@@ -46,6 +47,10 @@ export default function ARDetail() {
   const [jenisProblem, setJenisProblem] = useState([]);
   const [shiftOptions, setShiftOptions] = useState([]);
   const [loading, setLoading]         = useState(true);
+  // Cluster yang lagi dibuka popup rincian AR per Shift-nya (klik slice/
+  // legend di ArClusterDonut atau ring tunggal saat 1 Cluster difilter) --
+  // null = popup tertutup.
+  const [shiftPopupCluster, setShiftPopupCluster] = useState(null);
 
   // Opsi Shift ikut Master Data (tab Shift) -- konsisten dengan RC Harian
   // Produksi/Data Produksi, tidak di-hardcode di sini.
@@ -151,16 +156,19 @@ export default function ARDetail() {
             </div>
           ) : byCluster.length === 0 ? (
             <div style={{ color: 'var(--muted)', fontSize: 12 }}>Belum ada data.</div>
+          ) : byCluster.length > 1 ? (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <ArClusterDonut data={byCluster} avgAr={avgAr} mainSize={MAIN_SIZE} onClickCluster={setShiftPopupCluster} />
+            </div>
           ) : (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                <MiniRing value={avgAr} size={MAIN_SIZE} color={avgAr < AR_OK_THRESHOLD ? 'var(--red)' : 'var(--accent)'} showInsideText />
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>Rata-rata</div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, justifyContent: 'space-between' }}>
-                {byCluster.map((c) => (
-                  <MiniRing key={c.cluster} label={c.cluster} value={c.ar} size={MINI_SIZE} color={c.ar < AR_OK_THRESHOLD ? 'var(--red)' : (CLUSTER_COLORS[c.cluster] || 'var(--accent)')} />
-                ))}
+              <div
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                onClick={() => setShiftPopupCluster(byCluster[0].cluster)}
+                title="Lihat rincian AR per Shift"
+              >
+                <MiniRing value={byCluster[0].ar} size={MAIN_SIZE} color={byCluster[0].ar < AR_OK_THRESHOLD ? 'var(--red)' : 'var(--accent)'} showInsideText />
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>Cluster {byCluster[0].cluster}</div>
               </div>
             </div>
           )}
@@ -179,7 +187,7 @@ export default function ARDetail() {
           )}
         </div>
 
-        <div className="card">
+        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-header">
             <div className="card-title">Tren AR {filterSuffix}</div>
           </div>
@@ -187,11 +195,11 @@ export default function ARDetail() {
             <SkeletonBlock height={220} />
           ) : (
             <LineTrendChart
-              title=""
+              bare
               data={trendWithTarget}
               valueKey="ar"
               targetKey="target"
-              color="#0e5a52"
+              color="var(--accent)"
               unit="%"
               showMovingAvg
               movingAvgColor="var(--blue)"
@@ -277,6 +285,16 @@ export default function ARDetail() {
           )}
         </div>
       </div>
+
+      {shiftPopupCluster && (
+        <ArShiftPopup
+          cluster={shiftPopupCluster}
+          period={period}
+          refDate={refDate}
+          logout={logout}
+          onClose={() => setShiftPopupCluster(null)}
+        />
+      )}
     </div>
   );
 }
