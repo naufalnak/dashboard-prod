@@ -1,79 +1,78 @@
+// HTTP layer untuk domain Input Rejection / Material NG -- tipis, cuma
+// parse request & panggil services/rejection.service.js.
 const express = require('express');
-const { requireAuth } = require('../lib/auth');
-const { parsePagination } = require('../lib/apiHelpers');
-const { validateBody, validateId } = require('../middlewares/validate');
-const {
-  createRejectionEntry,
-  listRejectionEntries,
-  updateRejectionEntry,
-  deleteRejectionEntry,
-  getRejectionBreakdown,
-  getRejectionTrend,
-} = require('../services/rejection.service');
+const requireAuth = require('../middlewares/requireAuth');
+const rejectionService = require('../services/rejection.service');
 
 const router = express.Router();
 
-// Public — submit satu baris Input Rejection dari /lhp (tab "Input
-// Rejection", tanpa login), mirip pola /produksi-harian.
-router.post('/rejection-entry', validateBody(['tanggal', 'part_name'], 'tanggal dan part_name wajib diisi'), async (req, res, next) => {
+router.post('/rejection-entry', async (req, res, next) => {
   try {
-    const result = await createRejectionEntry(req.body);
-    res.status(201).json(result);
+    res.status(201).json(await rejectionService.createRejection(req.body));
   } catch (err) { next(err); }
 });
 
-// Login-gated — daftar Input Rejection untuk menu Data Rejection, dipaging
-// (bukan lagi seluruh baris periode sekaligus).
+// Login-gated — daftar semua Input Rejection untuk menu Data Rejection.
 router.get('/rejection-entries', requireAuth, async (req, res, next) => {
   try {
-    const { page, pageSize, skip, take } = parsePagination(req.query);
-    const result = await listRejectionEntries({
-      period: req.query.period, date: req.query.date, start: req.query.start, end: req.query.end,
-      page, pageSize, skip, take,
-    });
-    res.json(result);
+    res.json(await rejectionService.listRejection(req.query));
   } catch (err) { next(err); }
 });
 
-router.post('/rejection-entry-update', requireAuth, validateId(), async (req, res, next) => {
+router.post('/rejection-entry-update', requireAuth, async (req, res, next) => {
   try {
-    const id = req.body.id;
-    const result = await updateRejectionEntry(id, req.body);
-    if (!result) return res.status(404).json({ error: 'Not found' });
-    res.json(result);
+    const id = Number(req.body.id);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+    res.json(await rejectionService.updateRejection(id, req.body));
   } catch (err) { next(err); }
 });
 
-router.post('/rejection-entry-delete', requireAuth, validateId(), async (req, res, next) => {
+router.post('/rejection-entry-delete', requireAuth, async (req, res, next) => {
   try {
-    const id = req.body.id;
-    await deleteRejectionEntry(id);
+    const id = Number(req.body.id);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+    await rejectionService.deleteRejection(id);
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
 
-// Gabungan /rejection-by-cluster + /rejection-by-partname +
-// /kriteria-ng-stats -- ketiganya dulu 3 findMany terpisah ke
-// RejectionEntry dengan where (tanggal+cluster) yang PERSIS SAMA, ditembak
-// bareng dari RejectionDetail.jsx. Sekarang diturunkan dari satu query di
-// service.
-router.get('/rejection-breakdown', requireAuth, async (req, res, next) => {
+// ── GET /api/produksi-harian/rejection-by-cluster ──────
+// Reject Ratio rata-rata (Total LMR ÷ Total OK) per Cluster dalam periode
+// terpilih -- untuk halaman detail Rejection. Sumber data RejectionEntry
+// (menu Input Rejection), bukan lagi kolom Reject di ProduksiHarian.
+router.get('/rejection-by-cluster', requireAuth, async (req, res, next) => {
   try {
-    const result = await getRejectionBreakdown({
-      period: req.query.period, date: req.query.date, start: req.query.start, end: req.query.end,
-      cluster: req.query.cluster,
-    });
-    res.json(result);
+    res.json(await rejectionService.getRejectionByCluster(req.query));
   } catch (err) { next(err); }
 });
 
+// ── GET /api/produksi-harian/rejection-by-partname ─────
+// Reject Ratio per Part Name dalam periode terpilih -- untuk ranking 5
+// Part Name Reject tertinggi/terendah di halaman detail Rejection
+// (RejectionEntry tidak punya dimensi Line, jadi ranking-nya per Part
+// Name, bukan per Line seperti di Detail AR).
+router.get('/rejection-by-partname', requireAuth, async (req, res, next) => {
+  try {
+    res.json(await rejectionService.getRejectionByPartName(req.query));
+  } catch (err) { next(err); }
+});
+
+// ── GET /api/produksi-harian/kriteria-ng-stats ─────────
+// Persentase Kriteria NG (jenis cacat) yang diakumulasi dari RejectionEntry
+// dalam periode terpilih -- dipakai untuk donut chart di Detail Rejection.
+router.get('/kriteria-ng-stats', requireAuth, async (req, res, next) => {
+  try {
+    res.json(await rejectionService.getKriteriaNgStats(req.query));
+  } catch (err) { next(err); }
+});
+
+// ── GET /api/produksi-harian/rejection-trend ───────────
 // Tren Reject Ratio. Harian = per tanggal dalam bulan, Mingguan = per
-// minggu (Week 1..5) dalam bulan, Bulanan = per bulan dalam tahun, Tahunan
-// = per tahun.
+// minggu (Week 1..5) dalam bulan, Bulanan = per bulan dalam tahun,
+// Tahunan = per tahun.
 router.get('/rejection-trend', requireAuth, async (req, res, next) => {
   try {
-    const result = await getRejectionTrend({ period: req.query.period, date: req.query.date, cluster: req.query.cluster });
-    res.json(result);
+    res.json(await rejectionService.getRejectionTrend(req.query));
   } catch (err) { next(err); }
 });
 

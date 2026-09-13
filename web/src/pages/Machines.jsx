@@ -1,19 +1,17 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Search } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { fetchMachines } from '../services/masterService.js';
-import { useDebounce } from '../hooks/useDebounce.js';
+import { apiFetch } from '../api.js';
 
 export default function Machines() {
   const { logout } = useAuth();
   const [machines, setMachines] = useState([]);
   const [search, setSearch] = useState('');
-  const debouncedSearch = useDebounce(search, 300);
   const [filterCluster, setFilterCluster] = useState('');
   const [filterLine, setFilterLine] = useState('');
 
   useEffect(() => {
-    fetchMachines(logout).then(setMachines);
+    apiFetch('/machines', [], logout).then(setMachines);
   }, [logout]);
 
   const clusters = useMemo(() => [...new Set(machines.map((m) => m.cluster).filter(Boolean))].sort(), [machines]);
@@ -23,13 +21,13 @@ export default function Machines() {
   }, [machines, filterCluster]);
 
   const data = useMemo(() => {
-    const q = debouncedSearch.toLowerCase();
+    const q = search.toLowerCase();
     return machines.filter((m) =>
       (!q || m.machine.toLowerCase().includes(q) || (m.cluster || '').toLowerCase().includes(q) || (m.line || '').toLowerCase().includes(q)) &&
       (!filterCluster || m.cluster === filterCluster) &&
       (!filterLine || m.line === filterLine)
     );
-  }, [machines, debouncedSearch, filterCluster, filterLine]);
+  }, [machines, search, filterCluster, filterLine]);
 
   return (
     <div className="page-view active" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>

@@ -1,42 +1,37 @@
-import { useEffect } from "react";
-import { Minimize2 } from "lucide-react";
-
-import { AuthProvider, useAuth } from "./contexts/AuthContext";
-import { ThemeProvider } from "./contexts/ThemeContext";
-import { ToastProvider } from "./contexts/ToastContext";
-import { ConfirmProvider } from "./contexts/ConfirmContext";
-import { AppProvider, useApp } from "./contexts/AppContext";
-import { UIProvider, useUI } from "./contexts/UIContext";
-import { TargetsProvider } from "./contexts/TargetsContext";
-
-import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
-import Machines from "./pages/Machines";
-import DataProduksi from "./pages/DataProduksi";
-import DataRejection from "./pages/DataRejection";
-import DataOvertime from "./pages/DataOvertime";
-import DataRework from "./pages/DataRework";
-import ARDetail from "./pages/ARDetail";
-import OEEDetail from "./pages/OEEDetail";
-import RejectionDetail from "./pages/RejectionDetail";
-import OvertimeDetail from "./pages/OvertimeDetail";
-import Reports from "./pages/Reports";
-import MasterData from "./pages/MasterData";
-import ProblemLogPage from "./pages/ProblemLogPage";
-import DowntimeProduksi from "./pages/DowntimeProduksi";
-
-import Topbar from "./components/layout/Topbar";
-import AppSidebar from "./components/layout/AppSidebar";
-import BottomNav from "./components/layout/BottomNav";
-import MobileDrawer from "./components/layout/MobileDrawer";
-
-import NotifPanel from "./components/dashboard/NotifPanel";
-import TodoPanel from "./components/dashboard/TodoPanel";
-import DetailPanel from "./components/dashboard/DetailPanel";
-import WOPanel from "./components/dashboard/WOPanel";
-
-import ModalRoot from "./components/ui/ModalRoot";
-import TargetsModal from "./components/modals/TargetsModal";
+import { useEffect } from 'react';
+import { Minimize2 } from 'lucide-react';
+import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
+import { ThemeProvider } from './contexts/ThemeContext.jsx';
+import { ToastProvider } from './contexts/ToastContext.jsx';
+import { ConfirmProvider } from './contexts/ConfirmContext.jsx';
+import { AppProvider, useApp } from './contexts/AppContext.jsx';
+import { UIProvider, useUI } from './contexts/UIContext.jsx';
+import { TargetsProvider } from './contexts/TargetsContext.jsx';
+import TargetsModal from './components/TargetsModal.jsx';
+import Login from './pages/Login.jsx';
+import Dashboard from './pages/Dashboard.jsx';
+import Machines from './pages/Machines.jsx';
+import DataProduksi from './pages/DataProduksi.jsx';
+import DataRejection from './pages/DataRejection.jsx';
+import DataOvertime from './pages/DataOvertime.jsx';
+import DataRework from './pages/DataRework.jsx';
+import ARDetail from './pages/ARDetail.jsx';
+import OEEDetail from './pages/OEEDetail.jsx';
+import RejectionDetail from './pages/RejectionDetail.jsx';
+import OvertimeDetail from './pages/OvertimeDetail.jsx';
+import Reports from './pages/Reports.jsx';
+import MasterData from './pages/MasterData/index.jsx';
+import ProblemLogPage from './pages/ProblemLogPage.jsx';
+import DowntimeProduksi from './pages/DowntimeProduksi.jsx';
+import Topbar from './components/layout/Topbar.jsx';
+import AppSidebar from './components/layout/AppSidebar.jsx';
+import MobileDrawer from './components/layout/MobileDrawer.jsx';
+import BottomNav from './components/layout/BottomNav.jsx';
+import NotifPanel from './components/NotifPanel.jsx';
+import TodoPanel from './components/TodoPanel.jsx';
+import DetailPanel from './components/DetailPanel.jsx';
+import WOPanel from './components/WOPanel.jsx';
+import ModalRoot from './components/ModalRoot.jsx';
 
 const PAGES = { dashboard: Dashboard, machines: Machines, dataproduksi: DataProduksi, datarejection: DataRejection, dataovertime: DataOvertime, datarework: DataRework, ardetail: ARDetail, oeedetail: OEEDetail, rejectiondetail: RejectionDetail, overtimedetail: OvertimeDetail, reports: Reports, masterdata: MasterData, problemlog: ProblemLogPage, downtimeproduksi: DowntimeProduksi };
 

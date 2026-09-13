@@ -1,21 +1,24 @@
 {
-  "name": "dashboard-prod",
+  "name": "dashboard-mtn",
   "version": "1.0.0",
-  "description": "Production monitoring dashboard for CNC machines",
+  "description": "Maintenance monitoring dashboard for CNC machines",
   "main": "src/server.js",
-  "type": "commonjs",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node src/server.js",
-    "test": "jest --runInBand",
-    "test:watch": "jest --watch",
     "postinstall": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "seed": "node prisma/seed.js",
     "create-admin": "node scripts/create-admin.js",
-    "build": "prisma generate && prisma migrate deploy"
+    "build": "prisma generate && prisma migrate deploy",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
   "dependencies": {
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^3.0.3",
@@ -29,8 +32,7 @@
     "serverless-http": "^3.2.0"
   },
   "devDependencies": {
-    "jest": "^30.4.2",
     "prisma": "^5.22.0",
-    "supertest": "^7.1.4"
+    "vitest": "^4.1.11"
   }
 }

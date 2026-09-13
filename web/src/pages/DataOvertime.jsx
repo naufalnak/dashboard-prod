@@ -1,23 +1,19 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { RefreshCw, X, Pencil, Trash2 } from 'lucide-react';
-import Combobox from '../components/ui/Combobox.jsx';
-import SortTh from '../components/ui/SortTh.jsx';
-import ZoomCell from '../components/ui/ZoomCell.jsx';
-import Pagination from '../components/ui/Pagination.jsx';
-import EmptyErrorState from '../components/ui/EmptyErrorState.jsx';
-import { TableRowsSkeleton } from '../components/ui/Skeleton.jsx';
-import PeriodPicker from '../components/maintenance/PeriodPicker.jsx';
-import { useSort } from '../hooks/useSort.js';
-import { useColumnWidths, weightsToPercent } from '../hooks/useColumnWidths.js';
-import useHorizontalWheelScroll from '../hooks/useHorizontalWheelScroll.js';
+import Combobox from '../components/Combobox.jsx';
+import SortTh from '../components/SortTh.jsx';
+import ZoomCell from '../components/ZoomCell.jsx';
+import PeriodPicker from '../components/PeriodPicker.jsx';
+import { useSort } from '../useSort.js';
+import { useColumnWidths, weightsToPercent } from '../useColumnWidths.js';
+import useHorizontalWheelScroll from '../useHorizontalWheelScroll.js';
 import { formatDateID } from '../dateFmt.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { fetchMaster } from '../services/masterService.js';
-import { fetchOvertimeEntries, updateOvertimeEntry, deleteOvertimeEntry } from '../services/overtimeService.js';
-import { usePaginatedList, PAGE_SIZE } from '../hooks/usePaginatedList.js';
+import { apiFetch, apiSend } from '../api.js';
 import { useToast } from '../contexts/ToastContext.jsx';
 import { useConfirm } from '../contexts/ConfirmContext.jsx';
 import { isReadOnlyUser } from '../roles.js';
+import { Skeleton } from '../components/Skeleton.jsx';
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
@@ -69,7 +65,7 @@ function EditOvertimeModal({ row, master, onClose, onSaved }) {
   async function save() {
     setBusy(true);
     try {
-      await updateOvertimeEntry({
+      await apiSend('/overtime-entry-update', 'POST', {
         id: row.id,
         tanggal: form.tanggal, waktu: form.waktu, man_power: form.manPower,
         durasi_jam: form.durasiJam, keterangan: form.keterangan,
@@ -119,26 +115,24 @@ export default function DataOvertime() {
   const [period, setPeriod]   = useState('today');
   const [refDate, setRefDate] = useState(todayStr());
   const [query, setQuery]     = useState('');
+  const [rows, setRows]       = useState([]);
   const [master, setMaster]   = useState({ manPower: [] });
+  const [loading, setLoading] = useState(false);
   const [editRow, setEditRow] = useState(null);
 
-  const {
-    rows, page, setPage, totalPages, total, loading, error, reload: load,
-  } = usePaginatedList(
-    fetchOvertimeEntries,
-    (p, pageSize) => `period=${period}&date=${refDate}&page=${p}&pageSize=${pageSize}`,
-    [period, refDate],
-  );
+  const load = useCallback(() => {
+    setLoading(true);
+    apiFetch(`/overtime-entries?period=${period}&date=${refDate}`, [], logout).then((data) => {
+      setRows(data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [period, refDate, logout]);
 
+  useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    fetchMaster({ manPower: [] }, logout).then(setMaster);
+    apiFetch('/master', { manPower: [] }, logout).then(setMaster);
   }, [logout]);
 
-  useEffect(() => { setPage(1); }, [period, refDate]);
-
-  // Catatan: pencarian ini filter lokal, hanya menyaring baris di halaman
-  // yang lagi tampil (lihat Pagination di bawah tabel) -- bukan pencarian
-  // ke semua data.
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;
@@ -160,7 +154,7 @@ export default function DataOvertime() {
   async function handleDelete(row) {
     if (!(await confirm(`Hapus data Overtime ${row.manPower} (${row.tanggal})?`))) return;
     try {
-      await deleteOvertimeEntry(row.id, logout);
+      await apiSend('/overtime-entry-delete', 'POST', { id: row.id }, logout);
       showToast('Data berhasil dihapus', 'green');
       load();
     } catch (e) { showToast(e.message, 'red'); }
@@ -209,9 +203,9 @@ export default function DataOvertime() {
             </thead>
             <tbody>
               {loading && rows.length === 0 ? (
-                <TableRowsSkeleton rows={6} colSpan={8} />
+                <tr><td colSpan={8} style={td}><Skeleton height={12} width="60%" /></td></tr>
               ) : shown.length === 0 ? (
-                <EmptyErrorState as="row" colSpan={8} status={error ? 'error' : 'empty'} onRetry={load} emptyText={rows.length === 0 ? 'Belum ada data.' : 'Tidak ada yang cocok.'} />
+                <tr><td colSpan={8} style={td}>{rows.length === 0 ? 'Belum ada data.' : 'Tidak ada yang cocok.'}</td></tr>
               ) : shown.map((r) => (
                 <tr key={r.id}>
                   <td style={{ ...td, position: 'sticky', left: 0, background: 'var(--s1)' }}>
@@ -234,8 +228,6 @@ export default function DataOvertime() {
             </tbody>
           </table>
         </div>
-
-        <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onPageChange={setPage} disabled={loading} />
       </div>
 
       {editRow && (

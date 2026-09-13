@@ -26,18 +26,13 @@ export function clearAuth() {
 
 // GET with a fallback value on any failure (network, 401, non-2xx).
 // Calls onUnauthorized() instead of throwing when the token is invalid/expired.
-// Calls onError(err) for any other failure (network down, timeout, 5xx, non-2xx)
-// -- optional, so existing call sites that don't care keep working exactly
-// as before. Callers that DO pass it can use it to show an error state
-// instead of silently rendering the fallback as if it were real empty data.
-export async function apiFetch(path, fallback, onUnauthorized, onError) {
+export async function apiFetch(path, fallback, onUnauthorized) {
   try {
     const r = await fetch(API + path, { signal: AbortSignal.timeout(9000), headers: authHeader() });
     if (r.status === 401) { onUnauthorized?.(); return fallback; }
     if (!r.ok) throw new Error('Request failed');
     return await r.json();
-  } catch (e) {
-    onError?.(e);
+  } catch {
     return fallback;
   }
 }

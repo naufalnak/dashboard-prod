@@ -1,40 +1,39 @@
+// Baca & validasi environment variables di SATU tempat -- sebelumnya
+// process.env.X tersebar di beberapa file (lib/auth.js, lib/ipAllowlist.js,
+// server.js) masing-masing dengan fallback sendiri-sendiri. Kode baru
+// import config ini, bukan process.env langsung.
+//
+// CATATAN: file ini dipakai baik oleh src/server.js (lokal, dotenv lewat
+// require('dotenv').config() di sini) maupun lewat require chain dari
+// api/[...path].js (Vercel) yang sudah panggil dotenv duluan di file-nya
+// sendiri -- require('dotenv').config() aman dipanggil berkali-kali,
+// cuma efektif sekali (dotenv tidak menimpa env var yang sudah diset).
 require('dotenv').config();
 
 const NODE_ENV = process.env.NODE_ENV || 'development';
-const isProduction = NODE_ENV === 'production';
+const IS_PRODUCTION = NODE_ENV === 'production';
 
-// Wajib ada di semua environment -- tanpa ini app ga bisa connect ke DB
-// sama sekali, jadi lebih baik gagal cepat & jelas di startup daripada
-// nyangkut di error Prisma yang membingungkan belakangan.
-const REQUIRED_ALWAYS = ['DATABASE_URL', 'DIRECT_URL'];
-
-// JWT_SECRET punya fallback dev-only supaya local dev tetap bisa jalan
-// tanpa .env lengkap, TAPI fallback itu predictable dan tidak boleh
-// kepakai di production -- kalau ke-skip di sana, token admin jadi bisa
-// dipalsukan siapa pun yang tahu source code ini publik/private.
-const DEV_ONLY_JWT_SECRET = 'dev-only-insecure-secret-change-me';
-
-const missing = REQUIRED_ALWAYS.filter((key) => !process.env[key]);
-if (isProduction && !process.env.JWT_SECRET) missing.push('JWT_SECRET');
-
-if (missing.length > 0) {
-  console.error(`[config/env] Environment variable wajib belum diset: ${missing.join(', ')}`);
-  console.error('[config/env] Cek .env / .env.example, atau env vars di dashboard hosting (Render/Vercel).');
-  process.exit(1);
-}
-
-if (!isProduction && !process.env.JWT_SECRET) {
-  console.warn('[config/env] JWT_SECRET belum diset -- pakai secret dev-only (TIDAK aman untuk production).');
-}
-
-module.exports = {
+const env = {
   NODE_ENV,
-  isProduction,
-  PORT: Number(process.env.PORT),
-  DATABASE_URL: process.env.DATABASE_URL,
-  DIRECT_URL: process.env.DIRECT_URL,
-  JWT_SECRET: process.env.JWT_SECRET || DEV_ONLY_JWT_SECRET,
-  // Comma-separated IPs/CIDRs -- kosong berarti semua IP diizinkan (lihat
-  // lib/ipAllowlist.js).
+  IS_PRODUCTION,
+  PORT: Number(process.env.PORT) || 3001,
+  JWT_SECRET: process.env.JWT_SECRET || 'dev-only-insecure-secret-change-me',
+  // CIDR atau IP polos, dipisah koma -- lihat lib/ipAllowlist.js. Array
+  // kosong = allowlist nonaktif (tidak membatasi apa pun).
   ALLOWED_IPS: (process.env.ALLOWED_IPS || '').split(',').map((s) => s.trim()).filter(Boolean),
+  DATABASE_URL: process.env.DATABASE_URL || '',
+  DIRECT_URL: process.env.DIRECT_URL || '',
 };
+
+// Peringatan (bukan crash -- supaya tidak bikin build/test lokal gagal
+// total) kalau konfigurasi krusial untuk production belum diisi dengan
+// benar. JWT_SECRET & DATABASE_URL WAJIB diset lewat Vercel Environment
+// Variables di production, lihat catatan di CLAUDE.md.
+if (env.IS_PRODUCTION && env.JWT_SECRET === 'dev-only-insecure-secret-change-me') {
+  console.warn('[env] JWT_SECRET belum diset di production -- pakai default yang TIDAK aman.');
+}
+if (!env.DATABASE_URL) {
+  console.warn('[env] DATABASE_URL belum diset -- Prisma tidak akan bisa konek ke database.');
+}
+
+module.exports = env;

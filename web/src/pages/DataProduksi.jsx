@@ -1,23 +1,25 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { RefreshCw, X, ArrowUpRight, Download } from 'lucide-react';
-import ProduksiTable from '../components/dashboard/ProduksiTable.jsx';
+import ProduksiTable from '../components/ProduksiTable.jsx';
 import LineTrendChart from '../components/charts/LineTrendChart.jsx';
-import PeriodPicker from '../components/maintenance/PeriodPicker.jsx';
-import Combobox from '../components/ui/Combobox.jsx';
-import Pagination from '../components/ui/Pagination.jsx';
-import { CLUSTER_COLORS } from '../components/charts/ClusterBarList.jsx';
+import PeriodPicker from '../components/PeriodPicker.jsx';
+import Combobox from '../components/Combobox.jsx';
+import { CLUSTER_COLORS } from '../components/ClusterBarList.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useUI } from '../contexts/UIContext.jsx';
-import { fetchMaster, fetchMachines } from '../services/masterService.js';
-import { fetchProduksiHarian, updateProduksiHarian, deleteProduksiHarian, fetchArTrendByCluster } from '../services/produksiService.js';
-import { usePaginatedList, PAGE_SIZE } from '../hooks/usePaginatedList.js';
+import { apiFetch, apiSend } from '../api.js';
 import { useToast } from '../contexts/ToastContext.jsx';
 import { useConfirm } from '../contexts/ConfirmContext.jsx';
 import { isReadOnlyUser } from '../roles.js';
 import { downloadXlsx } from '../exportXlsx.js';
 import { formatDateID } from '../dateFmt.js';
+
+const API = '/api';
 const CLUSTERS = ['AD', 'BC', 'EF', 'FI'];
-const JENIS_PROBLEM_OPTS = ['Machine', 'Material', 'Method', 'Man', 'Environment', 'Setting & Tool'];
+// Sama daftar dengan RMOPublic.jsx (RC Harian Produksi) & ProblemLogPage.jsx
+// (Problem Produksi) -- 4M + Setting & Tool ("Environment" sudah dihapus
+// dari pilihan, data lama yang masih pakai nilai itu tidak di-backfill).
+const JENIS_PROBLEM_OPTS = ['Machine', 'Material', 'Method', 'Man', 'Setting & Tool'];
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
@@ -56,8 +58,22 @@ function EditProduksiModal({ row, master, machines, onClose, onSaved }) {
     jenisProblem: row.jenisProblem || '',
   });
   const [busy, setBusy] = useState(false);
+  // Mesin tambahan (koreksi baris lama yang seharusnya mencakup beberapa
+  // Mesin sekaligus, tapi cuma sempat tercatat 1) -- dicentang dari
+  // kandidat Master Data Proses ini SELAIN Mesin yang lagi dipilih di
+  // atas. Simpan akan clone baris ini (field produksi sama, downtime
+  // tidak ikut) jadi baris baru per Mesin yang dicentang di sini.
   const [additionalMesin, setAdditionalMesin] = useState([]);
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
+  function toggleAdditionalMesin(m) {
+    setAdditionalMesin((list) => (list.includes(m) ? list.filter((x) => x !== m) : [...list, m]));
+  }
+  // Jenis Problem WAJIB begitu ada Breakdown Mesin/Lost Time -- sama
+  // aturan dengan RC Harian Produksi (lihat validasi backend di
+  // /produksi-harian-update), supaya downtime yang dikoreksi lewat Data
+  // Produksi juga selalu punya kategori yang jelas (dipakai Problem
+  // Produksi & Dashboard-MTN).
+  const jenisProblemRequired = (Number(form.breakdownMesin) || 0) > 0 || (Number(form.lostTime) || 0) > 0;
 
   // Part Name & Proses sekarang bisa diganti langsung di sini, cascading
   // sama seperti RC Harian Produksi (/rmo): pilih Part Name -> pilihan
@@ -88,16 +104,22 @@ function EditProduksiModal({ row, master, machines, onClose, onSaved }) {
     return result.sort((a, b) => a.localeCompare(b));
   }, [master.proses]);
 
-  const prosesOptions = useMemo(
-    () => master.proses.filter((p) => p.partName === form.partName)
-      .map((p) => p.proses).sort((a, b) => a.localeCompare(b)),
+  // Satu Proses boleh punya lebih dari satu baris Master Data (satu per
+  // pilihan Mesin) -- dedupe ke satu entri per nama Proses supaya
+  // dropdown-nya tidak menampilkan nama yang sama berulang kali.
+  const prosesRowsForPartName = useMemo(
+    () => master.proses.filter((p) => p.partName === form.partName),
     [master.proses, form.partName],
   );
-
-  const prosesMatch = useMemo(
-    () => master.proses.find((p) => p.proses === form.proses && p.partName === form.partName),
-    [master.proses, form.proses, form.partName],
+  const prosesOptions = useMemo(
+    () => [...new Set(prosesRowsForPartName.map((p) => p.proses))].sort((a, b) => a.localeCompare(b)),
+    [prosesRowsForPartName],
   );
+  const prosesRowsForSelected = useMemo(
+    () => prosesRowsForPartName.filter((p) => p.proses === form.proses),
+    [prosesRowsForPartName, form.proses],
+  );
+  const prosesMatch = prosesRowsForSelected[0];
   // Cycle Time TIDAK bisa diketik manual -- selalu ikut nilai Master Data
   // untuk Proses yang lagi dipilih (fallback ke nilai lama kalau
   // kombinasi Part Name/Proses-nya belum/tidak match Master Data sama
@@ -117,6 +139,27 @@ function EditProduksiModal({ row, master, machines, onClose, onSaved }) {
     () => (machines || []).map((m) => ({ value: m.machine, sub: m.cluster ? `Cluster ${m.cluster}` : null })),
     [machines],
   );
+  // Kandidat Mesin (versi rich, buat tampilan dropdown) buat Proses yang
+  // lagi dipilih -- kalau > 1, field Mesin di bawah dipersempit ke
+  // pilihan ini saja, bukan seluruh katalog Machine.
+  const mesinOptionsForProses = useMemo(() => {
+    const seen = new Set();
+    const result = [];
+    for (const p of prosesRowsForSelected) {
+      const machineMatch = p.mesin ? (machines || []).find((m) => m.machine.toLowerCase() === p.mesin.toLowerCase()) : null;
+      if (!machineMatch || seen.has(machineMatch.machine.toLowerCase())) continue;
+      seen.add(machineMatch.machine.toLowerCase());
+      result.push({ value: machineMatch.machine, sub: machineMatch.cluster ? `Cluster ${machineMatch.cluster}` : null });
+    }
+    return result.sort((a, b) => a.value.localeCompare(b.value));
+  }, [prosesRowsForSelected, machines]);
+  // Kandidat lain (di luar Mesin yang lagi jadi Mesin utama) buat "+
+  // Tambah Mesin" -- baris lama yang seharusnya mencakup lebih dari satu
+  // Mesin sekaligus.
+  const otherMesinCandidates = useMemo(
+    () => mesinOptionsForProses.filter((m) => m.value !== form.mesin),
+    [mesinOptionsForProses, form.mesin],
+  );
   // Mesin TIDAK lagi wajib cocok Tabel Machine buat bisa disimpan (lihat
   // /produksi-harian-update) -- tapi tetap ditandai kalau nilainya belum
   // ada di katalog, supaya kelihatan mana yang masih perlu dikoreksi
@@ -126,44 +169,42 @@ function EditProduksiModal({ row, master, machines, onClose, onSaved }) {
     () => !form.mesin.trim() || (machines || []).some((m) => m.machine.toLowerCase() === form.mesin.trim().toLowerCase()),
     [machines, form.mesin],
   );
+  // Mesin "Manual" = Proses tidak pakai mesin (dikerjakan tangan) --
+  // Breakdown Mesin tidak relevan, dikunci 0. Dicek lagi di backend
+  // (produksi.service.js), bukan cuma di sini.
+  const isManualMesin = form.mesin.trim().toLowerCase() === 'manual';
   const lineOptions = useMemo(
     () => [...new Set(master.proses.map((p) => p.line).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
     [master.proses],
   );
-  // Kandidat Mesin buat "+ Tambah Mesin" -- Mesin lain yang tercatat di
-  // Master Data buat Part Name+Proses baris ini (selain Mesin baris ini
-  // sendiri) -- dipakai kalau baris lama ternyata seharusnya mencakup
-  // beberapa Mesin sekaligus, tapi cuma sempat tercatat 1. Baris baru
-  // hasil "+ Tambah Mesin" jadi bagian batch yang sama dengan baris ini
-  // (lihat additional_mesin di updateProduksiHarian/produksi.service.js).
-  const additionalMesinCandidates = useMemo(
-    () => [...new Set(master.proses
-      .filter((p) => p.partName === form.partName && p.proses === form.proses && p.mesin)
-      .map((p) => p.mesin))]
-      .filter((m) => m.toLowerCase() !== form.mesin.trim().toLowerCase())
-      .sort((a, b) => a.localeCompare(b)),
-    [master.proses, form.partName, form.proses, form.mesin],
-  );
-  function toggleAdditionalMesin(m) {
-    setAdditionalMesin((cur) => (cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m]));
-  }
 
   function pickPartName(partName) {
     setForm((f) => ({ ...f, partName, proses: '', line: '', mesin: '' }));
+    setAdditionalMesin([]);
   }
   function pickProses(prosesName) {
-    const match = master.proses.find((p) => p.proses === prosesName && p.partName === form.partName);
-    // Kalau Mesin baris Master Data ini kebetulan sudah cocok Tabel
-    // Machine, langsung terpilih; kalau belum (data lama belum
-    // dikoreksi), dikosongkan supaya admin pilih manual yang benar --
-    // tidak menebak sendiri. Line ikut nilai tersimpan di baris Proses
-    // Master Data itu sendiri (bukan dari Machine). Cluster ikut baris
-    // Proses ini juga (lihat catatan di partNameOptions).
-    const machineMatch = match?.mesin ? (machines || []).find((m) => m.machine.toLowerCase() === match.mesin.toLowerCase()) : null;
-    setForm((f) => ({ ...f, proses: prosesName, mesin: machineMatch?.machine || '', line: match?.line || '', cluster: match?.cluster || f.cluster }));
+    const rows = prosesRowsForPartName.filter((p) => p.proses === prosesName);
+    const match = rows[0];
+    // Kandidat Mesin dari SEMUA baris Master Data Proses ini yang
+    // kebetulan sudah cocok Tabel Machine (baris yang belum dikoreksi ke
+    // katalog tidak ikut jadi kandidat -- tidak menebak). Satu kandidat
+    // langsung terpilih; lebih dari satu dikosongkan dulu supaya admin
+    // pilih sendiri lewat dropdown Mesin yang sudah dipersempit (lihat
+    // mesinOptionsForProses).
+    const mesinCandidates = [...new Set(
+      rows.map((r) => r.mesin ? (machines || []).find((m) => m.machine.toLowerCase() === r.mesin.toLowerCase())?.machine : null).filter(Boolean),
+    )];
+    // Line ikut nilai tersimpan di baris Proses Master Data itu sendiri
+    // (bukan dari Machine). Cluster ikut baris Proses ini juga (lihat
+    // catatan di partNameOptions).
+    setForm((f) => ({ ...f, proses: prosesName, mesin: mesinCandidates.length === 1 ? mesinCandidates[0] : '', line: match?.line || '', cluster: match?.cluster || f.cluster }));
+    setAdditionalMesin([]);
   }
   function pickMesin(machineName) {
     setForm((f) => ({ ...f, mesin: machineName }));
+    // Mesin utama diganti -- keluarkan dari daftar tambahan kalau
+    // kebetulan sempat dicentang di situ (sekarang jadi Mesin utama).
+    setAdditionalMesin((list) => list.filter((m) => m !== machineName));
   }
 
   // Plan otomatis dari Cycle Time (ikut Proses yang dipilih) dan Waktu
@@ -190,9 +231,13 @@ function EditProduksiModal({ row, master, machines, onClose, onSaved }) {
       showToast('Part Name, Proses, Line, dan Mesin wajib diisi', 'red');
       return;
     }
+    if (jenisProblemRequired && !form.jenisProblem.trim()) {
+      showToast('Jenis Problem wajib diisi kalau ada Breakdown Mesin / Lost Time', 'red');
+      return;
+    }
     setBusy(true);
     try {
-      await updateProduksiHarian({
+      await apiSend('/produksi-harian-update', 'POST', {
         id: row.id,
         tanggal: form.tanggal, shift: form.shift, no_lot: form.noLot,
         cluster: form.cluster,
@@ -200,10 +245,16 @@ function EditProduksiModal({ row, master, machines, onClose, onSaved }) {
         man_power: form.manPower,
         cycle_time: cycleTime, waktu_efektif: form.waktuEfektif,
         plan, ok1: form.totalOk, ok2: 0, rwk: form.rework, rjct: form.reject,
-        breakdown_mesin: form.breakdownMesin, jenis_problem: form.jenisProblem, lost_time: form.lostTime, keterangan: form.keterangan,
+        breakdown_mesin: form.breakdownMesin, lost_time: form.lostTime, keterangan: form.keterangan,
+        jenis_problem: form.jenisProblem,
         additional_mesin: additionalMesin.length > 0 ? additionalMesin : undefined,
       }, logout);
-      showToast('Data berhasil diperbarui', 'green');
+      showToast(
+        additionalMesin.length > 0
+          ? `Data berhasil diperbarui, ${additionalMesin.length} baris baru dibuat untuk Mesin tambahan`
+          : 'Data berhasil diperbarui',
+        'green',
+      );
       onSaved();
       onClose();
     } catch (e) { showToast(e.message, 'red'); }
@@ -253,14 +304,45 @@ function EditProduksiModal({ row, master, machines, onClose, onSaved }) {
           <EditField label="Proses">
             <Combobox style={inp} value={form.proses} options={prosesOptions} onChange={pickProses} placeholder={form.partName ? 'Pilih Proses…' : 'Pilih Part Name dulu'} />
           </EditField>
-          <EditField label="Mesin" hint="sebisa mungkin dari Tabel Machine, ketik utk cari">
-            <Combobox style={inp} value={form.mesin} options={machinesRich} onChange={pickMesin} placeholder="Ketik atau pilih Mesin…" />
+          <EditField
+            label="Mesin"
+            hint={mesinOptionsForProses.length > 1 ? `${mesinOptionsForProses.length} pilihan buat Proses ini` : 'sebisa mungkin dari Tabel Machine, ketik utk cari'}
+          >
+            <Combobox
+              style={inp}
+              value={form.mesin}
+              options={mesinOptionsForProses.length > 0 ? mesinOptionsForProses : machinesRich}
+              onChange={pickMesin}
+              placeholder="Ketik atau pilih Mesin…"
+            />
             {!mesinLinked && (
               <div style={{ color: 'var(--yellow)', fontSize: 11, marginTop: 4 }}>
                 Belum terhubung ke Tabel Machine — Line tidak ikut otomatis, boleh disimpan tetap.
               </div>
             )}
           </EditField>
+          {/* Baris ini aslinya cuma tercatat 1 Mesin, tapi Master Data
+              Part Name+Proses ini punya Mesin lain juga -- centang di
+              sini kalau baris ini SEHARUSNYA mencakup Mesin itu juga
+              (mis. salah catat, aslinya beberapa mesin jalan bareng).
+              Simpan akan bikin baris BARU per Mesin yang dicentang (data
+              produksi sama seperti hasil edit di atas, downtime tidak
+              ikut disalin) -- baris ini sendiri tidak berubah jadi
+              gabungan, tetap representasi Mesin utamanya sendiri. */}
+          {otherMesinCandidates.length > 0 && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <EditField label="+ Tambah Mesin" hint="baris baru per Mesin yang dicentang, data sama seperti di atas">
+                <div style={{ ...inp, height: 'auto', display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 110, overflowY: 'auto', padding: '8px 10px' }}>
+                  {otherMesinCandidates.map((m) => (
+                    <label key={m.value} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={additionalMesin.includes(m.value)} onChange={() => toggleAdditionalMesin(m.value)} />
+                      {m.value}
+                    </label>
+                  ))}
+                </div>
+              </EditField>
+            </div>
+          )}
           <EditField label="Line Produksi">
             <Combobox style={inp} value={form.line} options={lineOptions} onChange={(v) => set('line', v)} placeholder="Ketik atau pilih Line…" />
           </EditField>
@@ -277,31 +359,30 @@ function EditProduksiModal({ row, master, machines, onClose, onSaved }) {
           <EditField label="Total OK"><input type="number" style={inp} value={form.totalOk} onChange={(e) => set('totalOk', e.target.value)} /></EditField>
           <EditField label="Rework"><input type="number" style={inp} value={form.rework} onChange={(e) => set('rework', e.target.value)} /></EditField>
           <EditField label="Reject"><input type="number" style={inp} value={form.reject} onChange={(e) => set('reject', e.target.value)} /></EditField>
-          <EditField label="Breakdown Mesin (menit)"><input type="number" style={inp} value={form.breakdownMesin} onChange={(e) => set('breakdownMesin', e.target.value)} /></EditField>
-          <EditField label="Lost Time (menit)"><input type="number" style={inp} value={form.lostTime} onChange={(e) => set('lostTime', e.target.value)} /></EditField>
-          <EditField label="Jenis Problem" hint="wajib kalau ada Breakdown Mesin/Lost Time">
-            <Combobox style={inp} value={form.jenisProblem} options={JENIS_PROBLEM_OPTS} onChange={(v) => set('jenisProblem', v)} placeholder="Ketik atau pilih…" />
+          <EditField label="Breakdown Mesin (menit)">
+            <input
+              type="number"
+              style={isManualMesin ? { ...inp, opacity: .6, cursor: 'not-allowed' } : inp}
+              value={isManualMesin ? 0 : form.breakdownMesin}
+              disabled={isManualMesin}
+              onChange={(e) => set('breakdownMesin', e.target.value)}
+            />
+            {isManualMesin && (
+              <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 4 }}>Mesin "Manual" — Breakdown Mesin tidak berlaku.</div>
+            )}
           </EditField>
+          <EditField label="Lost Time (menit)"><input type="number" style={inp} value={form.lostTime} onChange={(e) => set('lostTime', e.target.value)} /></EditField>
+          <EditField label={`Jenis Problem${jenisProblemRequired ? ' *' : ''}`}>
+            <Combobox
+              style={jenisProblemRequired && !form.jenisProblem.trim() ? { ...inp, borderColor: 'var(--red)' } : inp}
+              value={form.jenisProblem} options={JENIS_PROBLEM_OPTS} onChange={(v) => set('jenisProblem', v)}
+              placeholder="Ketik atau pilih Jenis Problem…"
+            />
+          </EditField>
+          <div />
           <div style={{ gridColumn: '1 / -1' }}>
             <EditField label="Keterangan"><textarea style={{ ...inp, minHeight: 60, resize: 'vertical' }} value={form.keterangan} onChange={(e) => set('keterangan', e.target.value)} /></EditField>
           </div>
-          {additionalMesinCandidates.length > 0 && (
-            <div style={{ gridColumn: '1 / -1' }}>
-              <EditField
-                label="+ Tambah Mesin"
-                hint="baris baru per Mesin yang dicentang, downtime tidak ikut disalin -- dipakai kalau baris ini seharusnya mencakup beberapa Mesin sekaligus"
-              >
-                <div style={{ ...inp, height: 'auto', display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 130, overflowY: 'auto', padding: '8px 10px' }}>
-                  {additionalMesinCandidates.map((m) => (
-                    <label key={m} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={additionalMesin.includes(m)} onChange={() => toggleAdditionalMesin(m)} />
-                      {m}
-                    </label>
-                  ))}
-                </div>
-              </EditField>
-            </div>
-          )}
         </div>
         <div className="modal-footer">
           <button className="btn primary" disabled={busy} onClick={save}>{busy ? 'Menyimpan…' : 'Simpan'}</button>
@@ -334,45 +415,37 @@ export default function DataProduksi() {
   }, [dataProduksiQuery, setDataProduksiQuery]);
   const [shiftFilter, setShiftFilter] = useState('all');
   const [clusterFilter, setClusterFilter] = useState('all');
+  const [rows, setRows]       = useState([]);
   const [trends, setTrends]   = useState({});
   const [master, setMaster]   = useState({ manPower: [], proses: [], partNames: [], shiftHours: [] });
   const [machines, setMachines] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [editRow, setEditRow] = useState(null);
 
-  const {
-    rows, page, setPage, totalPages, total, loading, error, reload: load,
-  } = usePaginatedList(
-    fetchProduksiHarian,
-    (p, pageSize) => `period=${period}&date=${refDate}&page=${p}&pageSize=${pageSize}`,
-    [period, refDate],
-  );
+  const load = useCallback(() => {
+    setLoading(true);
+    const qs = `period=${period}&date=${refDate}`;
+    fetch(`${API}/produksi-harian?${qs}`).then((r) => r.json()).then((data) => {
+      setRows(data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
 
-  useEffect(() => {
-    // Satu request buat semua Cluster sekaligus (dulu 4 request paralel
-    // /ar-trend, satu per Cluster) -- lihat catatan di endpoint
-    // /ar-trend-by-cluster. Tidak bergantung ke `page` (beda dari daftar
-    // baris di atas), jadi dipisah ke effect sendiri supaya tidak ikut
-    // refetch tiap kali cuma pindah halaman.
     const trendQs = `period=${period}&date=${refDate}`;
-    fetchArTrendByCluster(trendQs, {}, logout).then((map) => {
-      setTrends(map || {});
-    });
+    Promise.all(CLUSTERS.map((c) => apiFetch(`/ar-trend?${trendQs}&cluster=${c}`, [], logout)))
+      .then((results) => {
+        const map = {};
+        CLUSTERS.forEach((c, i) => { map[c] = results[i]; });
+        setTrends(map);
+      });
   }, [period, refDate, logout]);
 
+  useEffect(() => { load(); }, [load]);
+
   useEffect(() => {
-    fetchMaster({ manPower: [], proses: [], partNames: [], shiftHours: [] }, logout).then(setMaster);
-    fetchMachines(logout).then(setMachines);
+    apiFetch('/master', { manPower: [], proses: [], partNames: [], shiftHours: [] }, logout).then(setMaster);
+    apiFetch('/machines', [], logout).then(setMachines);
   }, [logout]);
 
-  useEffect(() => { setPage(1); }, [period, refDate]);
-
-  // Catatan: pencarian & filter Cluster/Shift ini semuanya filter lokal,
-  // hanya menyaring baris di halaman yang lagi tampil (lihat Pagination
-  // di bawah) -- bukan pencarian ke semua data. Ini juga berarti link
-  // "Ke Data Produksi" dari Master Data (yang set period='all' + query)
-  // cuma menemukan barisnya kalau kebetulan ada di halaman pertama;
-  // untuk baris lama yang mungkin ada di halaman berikutnya, user perlu
-  // menyempitkan periode dulu atau geser halaman manual.
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
@@ -428,16 +501,12 @@ export default function DataProduksi() {
     downloadXlsx(`data-produksi_${refDate}.xlsx`, 'Data Produksi', columns, exportRows);
   }
 
-  async function handleDelete(rowOrGroup) {
-    // "Hapus Semua" dari GroupActionsMenu (batch >1 Mesin) kirim array
-    // baris, bukan satu baris -- lihat ProduksiTable.jsx.
-    const group = Array.isArray(rowOrGroup) ? rowOrGroup : [rowOrGroup];
-    const label = group.length > 1
-      ? `Hapus ${group.length} baris (${group[0].partName}, ${group.map((r) => r.mesin).join(', ')})?`
-      : `Hapus data ${group[0].partName} (${group[0].tanggal})?`;
-    if (!(await confirm(label))) return;
+  // rowOrGroup: satu baris (Aksi biasa) ATAU array baris (dari "Hapus
+  // Semua" GroupActionsMenu di ProduksiTable, buat batch multi-Mesin).
+  async function handleDelete(row) {
+    if (!(await confirm(`Hapus data ${row.partName} (${row.tanggal})?`))) return;
     try {
-      for (const r of group) await deleteProduksiHarian(r.id, logout);
+      await apiSend('/produksi-harian-delete', 'POST', { id: row.id }, logout);
       showToast('Data berhasil dihapus', 'green');
       load();
     } catch (e) { showToast(e.message, 'red'); }
@@ -490,8 +559,6 @@ export default function DataProduksi() {
         </div>
       </div>
 
-      <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onPageChange={setPage} disabled={loading} />
-
       {CLUSTERS.filter((c) => clusterFilter === 'all' || c === clusterFilter).map((cluster) => (
         <div key={cluster} style={{ marginBottom: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -515,7 +582,7 @@ export default function DataProduksi() {
           </div>
 
           <div className="card" style={{ padding: 0 }}>
-            <ProduksiTable rows={byCluster[cluster] || []} loading={loading} error={error} onRetry={load} onEdit={readOnly ? null : setEditRow} onDelete={readOnly ? null : handleDelete} />
+            <ProduksiTable rows={byCluster[cluster] || []} loading={loading} onEdit={readOnly ? null : setEditRow} onDelete={readOnly ? null : handleDelete} />
           </div>
         </div>
       ))}

@@ -1,16 +1,15 @@
-import Skeleton from '../components/ui/Skeleton.jsx';
-import TableSkeleton from '../components/ui/TableSkeleton.jsx';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { useUI } from '../contexts/UIContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { fetchOvertimeBreakdown, fetchOvertimeTrend, fetchOvertimeEntries } from '../services/overtimeService.js';
+import { apiFetch } from '../api.js';
 import LineTrendChart from '../components/charts/LineTrendChart.jsx';
-import { CLUSTER_COLORS } from '../components/charts/ClusterBarList.jsx';
-import HorizontalBarList from '../components/charts/HorizontalBarList.jsx';
+import { CLUSTER_COLORS } from '../components/ClusterBarList.jsx';
+import HorizontalBarList from '../components/HorizontalBarList.jsx';
 import KriteriaNgChart from '../components/charts/KriteriaNgChart.jsx';
-import PeriodPicker from '../components/maintenance/PeriodPicker.jsx';
-import ZoomCell from '../components/ui/ZoomCell.jsx';
+import PeriodPicker from '../components/PeriodPicker.jsx';
+import ZoomCell from '../components/ZoomCell.jsx';
+import { SkeletonCircle, SkeletonBlock, SkeletonRows } from '../components/Skeleton.jsx';
 import { formatDateID } from '../dateFmt.js';
 
 const CLUSTERS = ['AD', 'BC', 'EF', 'FI'];
@@ -61,20 +60,26 @@ export default function OvertimeDetail() {
     setLoading(true);
     const qs = `period=${period}&date=${refDate}${clusterFilter !== 'all' ? `&cluster=${clusterFilter}` : ''}`;
     Promise.all([
-      fetchOvertimeBreakdown(qs, { byCluster: [], byManPower: [], byGroupHead: [] }, logout),
-      fetchOvertimeTrend(qs, [], logout),
-      fetchOvertimeEntries(qs, { rows: [] }, logout),
-    ]).then(([b, t, r]) => {
-      setByCluster(b.byCluster);
-      setByManPower(b.byManPower);
+      apiFetch(`/overtime-by-cluster?${qs}`, [], logout),
+      apiFetch(`/overtime-by-manpower?${qs}`, [], logout),
+      apiFetch(`/overtime-trend?${qs}`, [], logout),
+      apiFetch(`/overtime-by-group-head?${qs}`, [], logout),
+      apiFetch(`/overtime-entries?${qs}`, [], logout),
+    ]).then(([c, m, t, g, r]) => {
+      setByCluster(c);
+      setByManPower(m);
       setTrend(t);
-      setByGroupHead(b.byGroupHead);
-      setRecent(r.rows || []);
+      setByGroupHead(g);
+      setRecent(r);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [period, refDate, clusterFilter, logout]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Sub-judul kartu ikut filter Cluster yang aktif, sama pola dengan
+  // ARDetail/OEEDetail/RejectionDetail.
+  const clusterLabel = clusterFilter === 'all' ? 'Semua Cluster' : `Cluster ${clusterFilter}`;
 
   const totalJam = useMemo(() => byCluster.reduce((s, c) => s + c.jam, 0), [byCluster]);
 
@@ -114,9 +119,9 @@ export default function OvertimeDetail() {
 
       <div className="row4" style={{ gridTemplateColumns: '0.95fr 0.95fr 1.3fr', marginBottom: 16, alignItems: 'stretch' }}>
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div className="card-header"><div className="card-title">Overtime per Cluster</div></div>
+          <div className="card-header"><div className="card-title">Overtime {clusterLabel}</div></div>
           {loading ? (
-            <Skeleton width="100%" height={160} radius={8} />
+            <SkeletonRows rows={4} />
           ) : (
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16, justifyContent: 'center' }}>
               <div style={{ textAlign: 'center' }}>
@@ -129,9 +134,11 @@ export default function OvertimeDetail() {
         </div>
 
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div className="card-header"><div className="card-title">Overtime per Grup Head</div></div>
+          <div className="card-header"><div className="card-title">Overtime per Grup Head {clusterLabel}</div></div>
           {loading ? (
-            <Skeleton width="100%" height={160} radius={8} />
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <SkeletonCircle size={200} />
+            </div>
           ) : (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <KriteriaNgChart data={byGroupHead} mainSize={200} miniSize={62} />
@@ -141,45 +148,49 @@ export default function OvertimeDetail() {
 
         <div className="card">
           <div className="card-header">
-            <div className="card-title">Tren Overtime</div>
+            <div className="card-title">Tren Overtime {clusterLabel}</div>
           </div>
-          <LineTrendChart
-            title=""
-            data={trend}
-            valueKey="overtime"
-            color="#0e5a52"
-            unit="jam"
-            showMovingAvg
-            movingAvgColor="var(--blue)"
-          />
+          {loading ? (
+            <SkeletonBlock height={220} />
+          ) : (
+            <LineTrendChart
+              title=""
+              data={trend}
+              valueKey="overtime"
+              color="#0e5a52"
+              unit="jam"
+              showMovingAvg
+              movingAvgColor="var(--blue)"
+            />
+          )}
         </div>
       </div>
 
       <div className="row4" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 16, alignItems: 'stretch' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div className="card-header"><div className="card-title">5 Man Power Overtime Tertinggi</div></div>
+            <div className="card-header"><div className="card-title">5 Man Power Overtime Tertinggi — {clusterLabel}</div></div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <HorizontalBarList data={highest5} mode="bad" valueKey="jam" unit=" jam" />
+              {loading ? <SkeletonRows rows={5} /> : <HorizontalBarList data={highest5} mode="bad" valueKey="jam" unit=" jam" />}
             </div>
           </div>
           <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div className="card-header"><div className="card-title">5 Man Power Overtime Terendah</div></div>
+            <div className="card-header"><div className="card-title">5 Man Power Overtime Terendah — {clusterLabel}</div></div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <HorizontalBarList data={lowest5} mode="good" valueKey="jam" unit=" jam" />
+              {loading ? <SkeletonRows rows={5} /> : <HorizontalBarList data={lowest5} mode="good" valueKey="jam" unit=" jam" />}
             </div>
           </div>
         </div>
 
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-header">
-            <div className="card-title">Data Overtime Terbaru</div>
+            <div className="card-title">Data Overtime Terbaru — {clusterLabel}</div>
             <button className="card-action" style={{ display: 'flex', alignItems: 'center', gap: 4 }} onClick={() => navigate('dataovertime')}>
               Lihat Semua <ChevronRight size={12} />
             </button>
           </div>
           {loading ? (
-            <TableSkeleton rows={5} columns={5} />
+            <SkeletonRows rows={6} />
           ) : recentView.length === 0 ? (
             <div style={{ color: 'var(--muted)', fontSize: 12 }}>Belum ada data.</div>
           ) : (

@@ -29,27 +29,7 @@ function signToken(admin) {
   return jwt.sign({ sub: admin.id, username: admin.username, role: admin.role || 'maintenance' }, JWT_SECRET, { expiresIn: TOKEN_TTL });
 }
 
-function requireAuth(req, res, next) {
-  const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-  if (!token) return res.status(401).json({ error: 'Login required' });
-
-  try {
-    req.admin = jwt.verify(token, JWT_SECRET);
-  } catch {
-    return res.status(401).json({ error: 'Session expired, please log in again' });
-  }
-
-  // Read-only accounts boleh lewat untuk GET (lihat data) dan untuk
-  // menandai notifikasi mereka sendiri terbaca (bukan mutasi data
-  // produksi/master, cuma state baca-tidaknya sendiri) -- selain itu
-  // (semua endpoint mutasi, yang semuanya POST) ditolak di sini.
-  const isOwnNotificationRead = req.path === '/notifications-read' || req.path === '/notifications-read-all';
-  if (req.method !== 'GET' && !isOwnNotificationRead && isReadOnlyUsername(req.admin.username)) {
-    return res.status(403).json({ error: 'Akun ini read-only, tidak bisa mengubah data' });
-  }
-
-  next();
-}
-
-module.exports = { signToken, requireAuth, JWT_SECRET, isReadOnlyUsername, isPrivilegedUsername };
+// Middleware requireAuth (butuh req/res/next) sekarang di
+// src/middlewares/requireAuth.js -- file ini isinya cuma util auth murni
+// (sign/cek username), dipakai middleware itu & route handlers.
+module.exports = { signToken, isReadOnlyUsername, isPrivilegedUsername };

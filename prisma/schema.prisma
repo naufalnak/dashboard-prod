@@ -1,14 +1,12 @@
-// Dashbord-PROD-main
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["multiSchema"]
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x", "rhel-openssl-1.0.x"]
 }
 
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
-  schemas   = ["prod", "shared"]
 }
 
 // & dijalankan dari sisi Dashboard-MTN.
@@ -31,7 +29,6 @@ model Machine {
   reworkRows     PartReworkEntry[]
 
   @@map("Machine")
-  @@schema("shared")
 }
 
 model Admin {
@@ -40,8 +37,6 @@ model Admin {
   passwordHash String
   role         String   @default("maintenance") // maintenance | produksi
   createdAt    DateTime @default(now())
-
-  @@schema("shared")
 }
 
 // Master data relasional — dikelola lewat menu "Master Data" di dashboard
@@ -60,7 +55,6 @@ model MasterCluster {
   produksiRows ProduksiHarian[]
 
   @@map("CLUSTER")
-  @@schema("prod")
 }
 
 // 1 Group Head → 1 Cluster.
@@ -81,7 +75,6 @@ model MasterGroupHead {
   reworkRows    PartReworkEntry[]
 
   @@map("MasterGroupHead")
-  @@schema("prod")
 }
 
 // 1 Cluster → banyak Part Name.
@@ -102,7 +95,6 @@ model MasterPartName {
   reworkRows    PartReworkEntry[]
 
   @@map("MasterPartName")
-  @@schema("prod")
 }
 
 // Daftar kriteria/jenis cacat NG (mis. "cacat gores", "champer over",
@@ -116,7 +108,6 @@ model MasterKriteriaNg {
   rejectionRows RejectionEntry[]
 
   @@map("MasterKriteriaNg")
-  @@schema("prod")
 }
 
 // 1 Group Head → banyak Man Power (anak buahnya). name unik secara global
@@ -134,7 +125,6 @@ model MasterManPower {
   overtimeRows    OvertimeEntry[]
 
   @@map("MasterManPower")
-  @@schema("prod")
 }
 
 // Target jam lembur (Overtime), diset per bulan lewat Master Data karena
@@ -150,7 +140,6 @@ model MasterOvertimeTarget {
 
   @@unique([year, month])
   @@map("MasterOvertimeTarget")
-  @@schema("prod")
 }
 
 // 1 Part Name → banyak Proses. Tiap Proses punya Cycle Time sendiri, dan
@@ -195,7 +184,6 @@ model MasterProses {
   // satu baris (mis. beberapa pilihan Mesin), bukan otomatis "dihitung 1"
   // seperti sebelumnya. Lihat migration 20260813000000_drop_proses_partname_unique.
   @@map("MasterProses")
-  @@schema("prod")
 }
 
 // Resume Control Harian Produksi — satu baris per Part + Proses + Mesin per
@@ -238,9 +226,15 @@ model ProduksiHarian {
   // Link EKSPLISIT (bukan tebak-tebakan dari kecocokan field) antar baris
   // yang berasal dari satu submit multi-Mesin -- RC Harian input mode
   // centang-banyak-Mesin, atau "+ Tambah Mesin" di Data Produksi (lihat
-  // createProduksiHarian/updateProduksiHarian). Semua baris dalam satu
-  // batch berbagi UUID yang sama di sini; null untuk baris biasa (1
-  // Mesin, bukan bagian dari batch apa pun).
+  // createProduksi/updateProduksi). Semua baris dalam satu batch berbagi
+  // UUID yang sama di sini; null untuk baris biasa (1 Mesin, bukan
+  // bagian dari batch apa pun). Dipakai UI (ProduksiTable) buat
+  // menggabungkan tampilan jadi satu baris -- SEBELUMNYA sempat dicoba
+  // menebak dari kecocokan field produksi (tanggal/plan/ok dkk sama),
+  // tapi itu salah-kumpul baris yang KEBETULAN nilainya sama padahal
+  // tidak terkait sama sekali (lihat riwayat commit b4c857f -> revert
+  // fb3c88a) -- makanya sekarang pakai link eksplisit yang tidak bisa
+  // salah.
   batchId        String?  @map("batch_id")
 
   createdAt      DateTime @default(now()) @map("created_at")
@@ -250,24 +244,23 @@ model ProduksiHarian {
   partNameMaster MasterPartName?  @relation(fields: [partNameId], references: [id], onDelete: SetNull)
   prosesMaster   MasterProses?    @relation(fields: [prosesId], references: [id], onDelete: SetNull)
   manPowerMaster MasterManPower?  @relation(fields: [manPowerId], references: [id], onDelete: SetNull)
-  // Baris Problem Produksi yang otomatis dibuat/disinkron dari baris ini
-  // (kalau Loss Time/Breakdown Mesin diisi) -- lihat produksiHarianId di
-  // model ProblemLog & syncLinkedProblemLog di produksi.service.js.
   problemLogRow  ProblemLog?
 
-  @@index([tanggal])
-  @@index([clusterId])
-  @@index([grupHeadId])
-  @@index([partNameId])
-  @@index([prosesId])
-  @@index([manPowerId])
+  // Hampir semua endpoint dashboard/detail filter dengan pola yang sama:
+  // rentang tanggal (getPeriodRange) + opsional Cluster -- index komposit
+  // ini yang paling sering kepakai. Kolom lain diindex terpisah karena
+  // juga sering jadi filter/grouping sendiri (bukan cuma lewat tanggal).
+  @@index([tanggal, cluster])
+  @@index([partName])
+  @@index([mesin])
+  @@index([line])
   @@index([batchId])
   @@map("ProduksiHarian")
-  @@schema("shared")
 }
 
 // Log problem/root-cause untuk kasus AR/produksi rendah — ditampilkan di
-// halaman detail AR (tabel Problem, Root Cause, Temporary/Permanent Action).
+// halaman detail AR (tabel Problem, Root Cause, Temporary/Permanent Action)
+// dan menu Problem Produksi sendiri.
 model ProblemLog {
   id                Int       @id @default(autoincrement())
   tanggal           DateTime? // tanggal produksi saat problem terjadi (ikut form RC Harian)
@@ -281,31 +274,34 @@ model ProblemLog {
   temporaryAction   String?   @map("temporary_action")
   permanentAction   String?   @map("permanent_action")
   dueDate           DateTime? @map("due_date")
-  status            String    @default("open") // open | in_progress | closed
+  status            String    @default("open") // open | closed
   notes             String?
   closedAt          DateTime? @map("closed_at")
   createdAt         DateTime  @default(now()) @map("created_at")
   // Loss Time & Breakdown Mesin (menit) -- disalin dari ProduksiHarian saat
   // baris ini otomatis dibuat/disinkron karena Loss Time/Breakdown Mesin
   // diisi di RC Harian Produksi atau Data Produksi (lihat produksiHarianId
-  // di bawah & syncLinkedProblemLog di src/services/produksi.service.js).
+  // di bawah & upsertLinkedProblemLog di src/routes/api.js). Total Loss
+  // Time = lostTime + breakdownMesin, ditampilkan sebagai kolom di menu
+  // Problem Produksi.
   lostTime          Float     @default(0) @map("lost_time")
   breakdownMesin    Float     @default(0) @map("breakdown_mesin")
   // Baris ProduksiHarian sumber Loss Time/Breakdown Mesin ini (kalau baris
   // ini otomatis dibuat/disinkron dari sana) -- @unique supaya satu baris
-  // ProduksiHarian cuma pernah punya SATU baris ProblemLog terhubung.
-  // Baris ProblemLog yang dibuat manual lewat menu Problem Produksi
-  // sendiri (bukan dari form input produksi) punya produksiHarianId null.
+  // ProduksiHarian cuma pernah punya SATU baris ProblemLog terhubung,
+  // dipakai upsertLinkedProblemLog buat cari-atau-buat (bukan bikin baris
+  // baru tiap kali baris ProduksiHarian yang sama diedit ulang). Baris
+  // ProblemLog yang dibuat manual lewat menu Problem Produksi sendiri
+  // (bukan dari form input produksi) punya produksiHarianId null.
   produksiHarianId  Int?      @unique @map("produksi_harian_id")
 
   partNameMaster    MasterPartName? @relation(fields: [partNameId], references: [id], onDelete: SetNull)
-  produksiHarianRow ProduksiHarian? @relation(fields: [produksiHarianId], references: [id], onDelete: SetNull)
+  produksiHarianRow  ProduksiHarian? @relation(fields: [produksiHarianId], references: [id], onDelete: SetNull)
 
   @@index([tanggal])
-  @@index([partNameId])
+  @@index([status])
   @@index([jenisProblem])
   @@map("ProblemLog")
-  @@schema("shared")
 }
 
 // Notifikasi antar-user (mis. "Problem sudah Closed" ke user Grup Head
@@ -322,7 +318,6 @@ model Notification {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("Notification")
-  @@schema("prod")
 }
 
 // Default Waktu Efektif (jam) per Shift -- dikelola lewat Master Data,
@@ -335,7 +330,6 @@ model MasterShiftHours {
   defaultHours Float  @default(0) @map("default_hours")
 
   @@map("MasterShiftHours")
-  @@schema("prod")
 }
 
 // Input Rejection/Material NG -- terpisah dari ProduksiHarian karena
@@ -360,11 +354,9 @@ model RejectionEntry {
   partNameMaster   MasterPartName?   @relation(fields: [partNameId], references: [id], onDelete: SetNull)
   kriteriaNgMaster MasterKriteriaNg? @relation(fields: [kriteriaNgId], references: [id], onDelete: SetNull)
 
-  @@index([tanggal])
-  @@index([partNameId])
-  @@index([kriteriaNgId])
+  @@index([tanggal, cluster])
+  @@index([partName])
   @@map("RejectionEntry")
-  @@schema("prod")
 }
 
 // Input Overtime/Lembur -- terpisah dari ProduksiHarian, per Man Power
@@ -387,10 +379,9 @@ model OvertimeEntry {
 
   manPowerMaster MasterManPower? @relation(fields: [manPowerId], references: [id], onDelete: SetNull)
 
-  @@index([tanggal])
-  @@index([manPowerId])
+  @@index([tanggal, cluster])
+  @@index([groupHead])
   @@map("OvertimeEntry")
-  @@schema("prod")
 }
 
 // Data Pengerjaan Part Rework -- log terpisah dari ProduksiHarian.rework
@@ -431,11 +422,7 @@ model PartReworkEntry {
   grupHeadMaster MasterGroupHead? @relation(fields: [grupHeadId], references: [id], onDelete: SetNull)
   machineMaster  Machine?         @relation(fields: [machineId], references: [id], onDelete: SetNull)
 
-  @@index([tanggalDitemukan])
-  @@index([tanggalRepair])
-  @@index([partNameId])
-  @@index([grupHeadId])
-  @@index([machineId])
+  @@index([tanggalRepair, cluster])
+  @@index([partName])
   @@map("PartReworkEntry")
-  @@schema("prod")
 }

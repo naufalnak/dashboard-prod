@@ -1,72 +1,75 @@
+// HTTP layer untuk domain Input Overtime -- tipis, cuma parse request &
+// panggil services/overtime.service.js.
 const express = require('express');
-const { requireAuth } = require('../lib/auth');
-const { parsePagination } = require('../lib/apiHelpers');
-const { validateBody, validateId } = require('../middlewares/validate');
-const {
-  createOvertimeEntry,
-  listOvertimeEntries,
-  updateOvertimeEntry,
-  deleteOvertimeEntry,
-  getOvertimeBreakdown,
-  getOvertimeTrend,
-} = require('../services/overtime.service');
+const requireAuth = require('../middlewares/requireAuth');
+const overtimeService = require('../services/overtime.service');
 
 const router = express.Router();
 
-// Public — submit satu baris Input Overtime dari /lhp (tab "Overtime",
-// tanpa login), mirip pola /rejection-entry.
-router.post('/overtime-entry', validateBody(['tanggal'], 'tanggal wajib diisi'), async (req, res, next) => {
+router.post('/overtime-entry', async (req, res, next) => {
   try {
-    const result = await createOvertimeEntry(req.body);
-    res.status(201).json(result);
+    res.status(201).json(await overtimeService.createOvertime(req.body));
   } catch (err) { next(err); }
 });
 
-// Login-gated — daftar Input Overtime untuk menu Data Overtime, dipaging.
+// Login-gated — daftar semua Input Overtime untuk menu Data Overtime.
 router.get('/overtime-entries', requireAuth, async (req, res, next) => {
   try {
-    const { page, pageSize, skip, take } = parsePagination(req.query);
-    const result = await listOvertimeEntries({
-      period: req.query.period, date: req.query.date, start: req.query.start, end: req.query.end,
-      page, pageSize, skip, take,
-    });
-    res.json(result);
+    res.json(await overtimeService.listOvertime(req.query));
   } catch (err) { next(err); }
 });
 
-router.post('/overtime-entry-update', requireAuth, validateId(), async (req, res, next) => {
+router.post('/overtime-entry-update', requireAuth, async (req, res, next) => {
   try {
-    const result = await updateOvertimeEntry(req.body.id, req.body);
-    res.json(result);
+    const id = Number(req.body.id);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+    res.json(await overtimeService.updateOvertime(id, req.body));
   } catch (err) { next(err); }
 });
 
-router.post('/overtime-entry-delete', requireAuth, validateId(), async (req, res, next) => {
+router.post('/overtime-entry-delete', requireAuth, async (req, res, next) => {
   try {
-    await deleteOvertimeEntry(req.body.id);
+    const id = Number(req.body.id);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+    await overtimeService.deleteOvertime(id);
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
 
-// Gabungan /overtime-by-cluster + /overtime-by-manpower +
-// /overtime-by-group-head, diturunkan dari satu query di service.
-router.get('/overtime-breakdown', requireAuth, async (req, res, next) => {
+// ── GET /api/produksi-harian/overtime-by-cluster ────────
+// Total jam lembur per Cluster dalam periode terpilih -- untuk kartu ring
+// per-Cluster di halaman Detail Overtime.
+router.get('/overtime-by-cluster', requireAuth, async (req, res, next) => {
   try {
-    const result = await getOvertimeBreakdown({
-      period: req.query.period, date: req.query.date, start: req.query.start, end: req.query.end,
-      cluster: req.query.cluster,
-    });
-    res.json(result);
+    res.json(await overtimeService.getOvertimeByCluster(req.query));
   } catch (err) { next(err); }
 });
 
+// ── GET /api/produksi-harian/overtime-by-manpower ───────
+// Total jam lembur per Man Power dalam periode terpilih -- untuk ranking 5
+// Man Power lembur tertinggi/terendah di halaman Detail Overtime.
+router.get('/overtime-by-manpower', requireAuth, async (req, res, next) => {
+  try {
+    res.json(await overtimeService.getOvertimeByManPower(req.query));
+  } catch (err) { next(err); }
+});
+
+// ── GET /api/produksi-harian/overtime-by-group-head ─────
+// Total jam lembur per Grup Head dalam periode terpilih -- untuk donut
+// breakdown di halaman Detail Overtime.
+router.get('/overtime-by-group-head', requireAuth, async (req, res, next) => {
+  try {
+    res.json(await overtimeService.getOvertimeByGroupHead(req.query));
+  } catch (err) { next(err); }
+});
+
+// ── GET /api/produksi-harian/overtime-trend ─────────────
 // Tren total jam lembur. Harian = per tanggal dalam bulan, Mingguan = per
-// minggu (Week 1..5) dalam bulan, Bulanan = per bulan dalam tahun, Tahunan
-// = per tahun.
+// minggu (Week 1..5) dalam bulan, Bulanan = per bulan dalam tahun,
+// Tahunan = per tahun.
 router.get('/overtime-trend', requireAuth, async (req, res, next) => {
   try {
-    const result = await getOvertimeTrend({ period: req.query.period, date: req.query.date, cluster: req.query.cluster });
-    res.json(result);
+    res.json(await overtimeService.getOvertimeTrend(req.query));
   } catch (err) { next(err); }
 });
 

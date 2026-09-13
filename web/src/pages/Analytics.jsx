@@ -2,9 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { Calendar, Play, RefreshCw, Save } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { fetchWorkingCalendar, saveWorkingCalendarMonth, fetchAnalytics, computeAnalytics } from '../services/analyticsService.js';
-import Skeleton from '../components/ui/Skeleton.jsx';
-import TableSkeleton from '../components/ui/TableSkeleton.jsx';
+import { apiFetch, apiSend } from '../api.js';
+import { Skeleton, SkeletonRows } from '../components/Skeleton.jsx';
 
 const MONTH_NAMES_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 const MONTH_NAMES_FULL = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
@@ -23,7 +22,7 @@ function WorkingCalendarCard() {
   const fetchCalendar = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await fetchWorkingCalendar(calYear, logout);
+      const data = await apiFetch(`/working-calendar?year=${calYear}`, null, logout);
       if (data?.records) {
         const d = Array(12).fill(22);
         for (const r of data.records) d[r.month - 1] = r.workingDays;
@@ -44,7 +43,7 @@ function WorkingCalendarCard() {
     setSaving(true);
     try {
       for (let m = 0; m < 12; m++) {
-        await saveWorkingCalendarMonth({ year: calYear, month: m + 1, workingDays: days[m] }, logout);
+        await apiSend('/working-calendar', 'PUT', { year: calYear, month: m + 1, workingDays: days[m] }, logout);
       }
       showToast(`Kalender kerja ${calYear} disimpan`, 'green');
     } catch (e) { showToast(e.message || 'Gagal menyimpan', 'red'); }
@@ -76,10 +75,8 @@ function WorkingCalendarCard() {
       </div>
 
       {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8 }}>
-          {Array.from({ length: 12 }).map((_, i) => (
-            <Skeleton key={i} height={64} radius={8} />
-          ))}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8, marginBottom: 10 }}>
+          {Array.from({ length: 12 }, (_, i) => <Skeleton key={i} height={64} radius={8} />)}
         </div>
       ) : (
         <>
@@ -144,7 +141,7 @@ export default function Analytics() {
     setLoading(true);
     setError('');
     try {
-      const data = await fetchAnalytics(logout);
+      const data = await apiFetch('/analytics?limit=200', null, logout);
       if (data) {
         setRecords(data.records ?? []);
         setTotal(data.total ?? 0);
@@ -160,7 +157,7 @@ export default function Analytics() {
   async function handleCompute() {
     setComputing(true);
     try {
-      const result = await computeAnalytics({ period, date }, logout);
+      const result = await apiSend('/analytics-compute', 'POST', { period, date }, logout);
       showToast(`Kalkulasi selesai — ${result.computed} mesin dihitung`, 'green');
       await fetchAnalytics();
     } catch (e) {
@@ -223,7 +220,7 @@ export default function Analytics() {
           <span style={{ fontSize: 11, color: 'var(--muted)' }}>{total} record</span>
         </div>
 
-        {loading && <TableSkeleton rows={6} columns={10} />}
+        {loading && <div style={{ padding: '10px 16px' }}><SkeletonRows rows={6} height={20} /></div>}
         {error && <div style={{ color: 'var(--red)', fontSize: 13, padding: 16 }}>{error}</div>}
 
         {!loading && !error && (

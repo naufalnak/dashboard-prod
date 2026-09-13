@@ -3,8 +3,8 @@ import { Target, Calendar, Save, RefreshCw, CheckCircle2, RotateCcw } from 'luci
 import { useTargets, DEFAULTS } from '../contexts/TargetsContext.jsx';
 import { useToast } from '../contexts/ToastContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { fetchWorkingCalendar, saveWorkingCalendarMonth } from '../services/analyticsService.js';
-import Skeleton from '../components/ui/Skeleton.jsx';
+import { apiFetch, apiSend } from '../api.js';
+import { Skeleton } from '../components/Skeleton.jsx';
 
 const MONTH_NAMES = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 
@@ -133,7 +133,7 @@ function CalendarSection() {
   const fetchCalendar = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await fetchWorkingCalendar(calYear, logout);
+      const data = await apiFetch(`/working-calendar?year=${calYear}`, null, logout);
       if (data?.records) {
         const d = Array(12).fill(22);
         for (const r of data.records) d[r.month - 1] = r.workingDays;
@@ -154,7 +154,7 @@ function CalendarSection() {
     setSaving(true);
     try {
       for (let m = 0; m < 12; m++) {
-        await saveWorkingCalendarMonth({ year: calYear, month: m + 1, workingDays: days[m] }, logout);
+        await apiSend('/working-calendar', 'PUT', { year: calYear, month: m + 1, workingDays: days[m] }, logout);
       }
       showToast(`Kalender kerja ${calYear} disimpan`, 'green');
     } catch (e) { showToast(e.message || 'Gagal menyimpan', 'red'); }
@@ -183,9 +183,7 @@ function CalendarSection() {
 
       {loading ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8, marginBottom: 12 }}>
-          {Array.from({ length: 12 }).map((_, i) => (
-            <Skeleton key={i} height={64} radius={8} />
-          ))}
+          {Array.from({ length: 12 }, (_, i) => <Skeleton key={i} height={64} radius={8} />)}
         </div>
       ) : (
         <>

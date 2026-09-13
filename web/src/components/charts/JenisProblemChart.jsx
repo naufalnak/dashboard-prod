@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-// Donut chart persentase Jenis Problem (4M + 1E + Setting & Tool),
+// Donut chart persentase Jenis Problem (4M + Setting & Tool),
 // diakumulasi dari kolom ProduksiHarian.jenis_problem dalam periode
 // terpilih. Gaya ring berlubang di tengah (sama seperti MiniRing/
 // GaugeCard), bukan pie solid -- tiap kategori digambar sebagai segmen
@@ -8,6 +8,9 @@ import { useState } from 'react';
 // (ClusterBarList.jsx: biru/amber/teal gelap/ungu) supaya dua chart yang
 // bersebelahan di Detail AR tidak kelihatan pakai warna yang sama --
 // tone cerah tapi tidak terlalu terang, bukan warna gelap.
+// "Environment" sudah dihapus dari pilihan input Jenis Problem, tapi
+// warnanya TETAP disimpan di sini -- data lama yang masih pakai nilai
+// itu tidak di-backfill, chart-nya harus tetap bisa mewarnai baris lama.
 const JENIS_COLORS = {
   Machine: '#ef4444',
   Material: '#84cc16',

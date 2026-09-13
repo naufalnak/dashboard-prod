@@ -1,38 +1,29 @@
-require("dotenv").config();
+require('./config/env');
 
-const fs = require("fs");
-const path = require("path");
-const express = require("express");
-const cors = require("cors");
-const morgan = require("morgan");
-
-const ipAllowlist = require("./lib/ipAllowlist");
-const errorHandler = require("./middlewares/errorHandler");
+const path = require('path');
+const express = require('express');
+const cors = require('cors');
+const morgan = require('morgan');
+const ipAllowlist = require('./lib/ipAllowlist');
+const errorHandler = require('./middlewares/errorHandler');
 
 const app = express();
 
-app.set("trust proxy", 1);
-
+app.set('trust proxy', true);
 app.use(ipAllowlist);
-app.use(morgan("tiny"));
+app.use(morgan('tiny'));
 app.use(cors());
 app.use(express.json());
 
-// API
-app.use("/api", require("./routes"));
+app.use('/api', require('./routes/api'));
 
-// Frontend React (hanya kalau web/dist ada)
-const webDist = path.join(__dirname, "..", "web", "dist");
+// Serve the built React frontend (web/dist)
+const webDist = path.join(__dirname, '..', 'web', 'dist');
+app.use(express.static(webDist));
+app.use((req, res) => {
+  res.sendFile(path.join(webDist, 'index.html'));
+});
 
-if (fs.existsSync(webDist)) {
-  app.use(express.static(webDist));
-
-  app.get(/^(?!\/api).*/, (req, res) => {
-    res.sendFile(path.join(webDist, "index.html"));
-  });
-}
-
-// Error handler paling terakhir
-app.use(errorHandler);
+app.use(errorHandler());
 
 module.exports = app;

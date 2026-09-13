@@ -210,12 +210,21 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
 .group-box{position:relative;border:1px solid var(--border);border-radius:8px;padding:16px 16px 14px;margin-top:12px;background:var(--s1)}
 .group-box-title{position:absolute;top:-10px;left:14px;background:var(--s1);padding:0 8px;font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
 /* RC Harian Produksi / Input Rejection / Input Overtime (RMOPublic.jsx
-   "Panel" component, dipakai di ketiga form itu): label ada yang 1 baris
-   ada yang 2-3 baris (sub-teks penjelasan), jadi input/kotak di baris
-   grid yang sama jadi tidak sejajar kalau cuma display:grid biasa --
-   tiap sel dibikin kolom flex dengan konten didorong ke bawah supaya
-   input-nya selalu sejajar horizontal, berapa pun panjang labelnya. */
-.rc-panel-grid > div,.rc-panel-grid-2 > div,.rc-panel-grid-3 > div{display:flex;flex-direction:column;justify-content:flex-end}
+   "Panel" component, dipakai di ketiga form itu): tiap sel dibikin kolom
+   flex supaya label & input-nya bisa diatur sejajar dalam satu baris
+   grid. justify-content SENGAJA flex-start (rata atas), BUKAN flex-end --
+   dulu flex-end (rata bawah) dipakai supaya input tetap sejajar walau
+   label ada yang 1 vs 2-3 baris (sub-teks). Tapi begitu makin banyak sel
+   yang punya KONTEN TAMBAHAN DI BAWAH input (hint/error/checklist Mesin
+   dkk, bukan cuma label yang beda tinggi), flex-end malah bikin LABEL-nya
+   yang tidak sejajar (sel dengan konten tambahan mendorong labelnya ke
+   atas, sel tanpa itu labelnya "mengambang" turun) -- rata atas jauh
+   lebih konsisten karena label SELALU jadi elemen pertama tiap sel,
+   apa pun yang berubah tinggi di bawahnya (checklist Mesin, hint Manual,
+   pesan error, dst). Elemen yang sengaja perlu tumbuh ke bawah (mis.
+   textarea Problem) diatur pakai flex:1 pada elemen itu sendiri, bukan
+   lagi mengandalkan trik flex-end di sini. */
+.rc-panel-grid > div,.rc-panel-grid-2 > div,.rc-panel-grid-3 > div{display:flex;flex-direction:column;justify-content:flex-start}
 .rc-panel-grid{grid-template-columns:1fr 1fr 1fr 1fr}
 .rc-panel-grid-2{grid-template-columns:1fr 1fr}
 .rc-panel-grid-3{grid-template-columns:1fr 1fr 1fr}
@@ -234,7 +243,29 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
 }
 .rc-2col-grouphead{grid-area:grouphead}
 .rc-2col-aktual{grid-area:aktual;margin-bottom:0!important}
-.rc-2col-problem{grid-area:problem;margin-bottom:0!important}
+/* align-self:stretch (menimpa align-items:start punya .rc-2col) supaya
+   panel ini setinggi baris grid-nya (row 2, 1fr -- ikut tinggi Aktual
+   Produksi di sampingnya), bukan cuma setinggi kontennya sendiri --
+   dipasangkan dengan .rc-panel-stretch/.rc-panel-grid-fill di bawah supaya
+   sisa ruang di dalamnya kepakai (bukan nyisa kosong di bawah field). */
+.rc-2col-problem{grid-area:problem;margin-bottom:0!important;align-self:stretch}
+/* Dipakai lewat prop `stretch` di komponen Panel (shared.jsx) -- child
+   terakhir grid (field yang ditandai flex:1 sendiri, mis. textarea
+   Problem) yang benar-benar mengisi sisa tinggi row terakhir (1fr).
+   Tidak berefek kalau parent tidak punya tinggi definitif buat
+   di-stretch (mis. di HP, lihat @media di bawah -- .rc-2col-problem
+   tidak lagi 1fr di sana), jadi aman dipasang tanpa media query
+   terpisah.
+   3 row eksplisit (bukan 2) -- baris pertama disediakan buat field
+   kondisional "Mesin Problem" (RMOForm.jsx, cuma muncul kalau Mesin
+   dipilih lebih dari satu). SLOT-nya WAJIB tetap dirender (kosong/tanpa
+   isi kalau tidak dipakai, lihat RMOForm.jsx) biar jumlah row tetap 3 --
+   kalau slot itu di-skip total, item-item sesudahnya ikut naik satu row
+   (auto-flow CSS Grid), dan row 1fr yang harusnya buat Problem malah
+   kepakai baris Jenis Problem/Loss Time/Breakdown Mesin, bikin baris itu
+   melar dengan ruang kosong ganjil di dalamnya. */
+.rc-panel-stretch{display:flex;flex-direction:column}
+.rc-panel-grid-fill{flex:1;grid-template-rows:auto auto 1fr}
 
 /* Form RC Harian Produksi / Input Rejection / Input Overtime di layar
    sempit (HP) -- default-nya 4 kolom (Panel) & 2 kolom (Grup Head) pas
@@ -622,6 +653,7 @@ textarea.form-input{resize:vertical;min-height:64px}
 .kpi-row .kpi-card:nth-child(4){animation-delay:.16s}
 .kpi-row .kpi-card:nth-child(5){animation-delay:.20s}
 .loading-pulse{animation:pulse 1.4s infinite}
+.skeleton{background:var(--s3);animation:pulse 1.4s ease-in-out infinite}
 
 /* ═══════════════════════════════════════
    MOBILE  (≤767px)
@@ -929,29 +961,3 @@ textarea.form-input{resize:vertical;min-height:64px}
 .pres-fab:hover{color:var(--text);background:rgba(30,30,46,.9)}
 /* Fix InfoTip z-index: hovered KPI card rises above siblings */
 .kpi-card:hover{z-index:10}
-
-.skeleton {
-  position: relative;
-  overflow: hidden;
-  background: #2b3444;
-}
-
-.skeleton::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255,255,255,.12),
-    transparent
-  );
-  animation: skeleton-loading 1.2s infinite;
-}
-
-@keyframes skeleton-loading {
-  100% {
-    transform: translateX(100%);
-  }
-}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import Modal from '../ui/Modal.jsx';
+import Modal from '../Modal.jsx';
 import { useUI } from '../../contexts/UIContext.jsx';
 import { useToast } from '../../contexts/ToastContext.jsx';
 import { useAuth } from '../../contexts/AuthContext.jsx';

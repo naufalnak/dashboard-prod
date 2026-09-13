@@ -2,9 +2,8 @@ import { useState, useMemo, useEffect } from 'react';
 import { Search, RefreshCw, ChevronUp, ChevronDown, FolderUp } from 'lucide-react';
 import { useApp } from '../contexts/AppContext.jsx';
 import { useUI } from '../contexts/UIContext.jsx';
-import PeriodPicker from '../components/maintenance/PeriodPicker.jsx';
+import PeriodPicker from '../components/PeriodPicker.jsx';
 import { fmtDate } from '../utils/fmt.js';
-import { useDebounce } from '../hooks/useDebounce.js';
 
 function fmtHrs(hrs) {
   if (hrs == null || hrs === '') return '—';
@@ -24,7 +23,6 @@ export default function Maintenance() {
   const { openModal, showWODetail, maintFilter, setMaintFilter } = useUI();
 
   const [search, setSearch]             = useState('');
-  const debouncedSearch                 = useDebounce(search, 300);
   const [statusFilter, setStatusFilter] = useState('all');
   const [machineFilter, setMachineFilter] = useState('');
   const [sortKey, setSortKey]           = useState('date');
@@ -53,7 +51,7 @@ export default function Maintenance() {
   }
 
   const data = useMemo(() => {
-    const q = debouncedSearch.toLowerCase();
+    const q = search.toLowerCase();
     const filtered = breakdowns.filter((b) => {
       const ms = !q || b.machine.toLowerCase().includes(q) || b.cause.toLowerCase().includes(q);
       const ss = statusFilter === 'all' || b.status === statusFilter;
@@ -64,7 +62,7 @@ export default function Maintenance() {
       const av = a[sortKey] ?? '', bv = b[sortKey] ?? '';
       return sortDir * String(av).localeCompare(String(bv));
     });
-  }, [breakdowns, debouncedSearch, statusFilter, machineFilter, sortKey, sortDir]);
+  }, [breakdowns, search, statusFilter, machineFilter, sortKey, sortDir]);
 
   const arrow = (k) => sortKey === k
     ? (sortDir === 1

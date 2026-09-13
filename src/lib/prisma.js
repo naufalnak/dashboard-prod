@@ -1,4 +1,4 @@
-require('../config/env'); // validasi & load .env terpusat -- lihat file itu
+require('../config/env');
 const { PrismaClient } = require('@prisma/client');
 
 // Reuse the same client across warm Vercel invocations to avoid reconnect overhead.

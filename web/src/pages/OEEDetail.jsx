@@ -1,18 +1,17 @@
-import Skeleton from '../components/ui/Skeleton.jsx';
-import TableSkeleton from '../components/ui/TableSkeleton.jsx';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { useUI } from '../contexts/UIContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { fetchOeeBreakdown, fetchOeeTrend } from '../services/produksiService.js';
-import MiniRing from '../components/charts/MiniRing.jsx';
+import { apiFetch } from '../api.js';
+import MiniRing from '../components/MiniRing.jsx';
 import LineTrendChart from '../components/charts/LineTrendChart.jsx';
-import { CLUSTER_COLORS } from '../components/charts/ClusterBarList.jsx';
-import HorizontalBarList from '../components/charts/HorizontalBarList.jsx';
+import { CLUSTER_COLORS } from '../components/ClusterBarList.jsx';
+import HorizontalBarList from '../components/HorizontalBarList.jsx';
 import JenisProblemChart from '../components/charts/JenisProblemChart.jsx';
-import PeriodPicker from '../components/maintenance/PeriodPicker.jsx';
-import SortTh from '../components/ui/SortTh.jsx';
-import { useSort } from '../hooks/useSort.js';
+import PeriodPicker from '../components/PeriodPicker.jsx';
+import SortTh from '../components/SortTh.jsx';
+import { SkeletonCircle, SkeletonBlock, SkeletonRows } from '../components/Skeleton.jsx';
+import { useSort } from '../useSort.js';
 
 const MAIN_SIZE = 200;
 const MINI_SIZE = 62;
@@ -51,24 +50,25 @@ export default function OEEDetail() {
     setLoading(true);
     const qs = `period=${period}&date=${refDate}${clusterFilter !== 'all' ? `&cluster=${clusterFilter}` : ''}`;
     Promise.all([
-      fetchOeeBreakdown(qs, { overall: { avb: 0, perf: 0, yield: 0, oee: 0 }, byCluster: [], byLine: [] }, logout),
-      fetchOeeTrend(qs, [], logout),
-    ]).then(([b, t]) => {
-      setByCluster(b.byCluster);
-      setByLine(b.byLine);
+      apiFetch(`/oee-by-cluster?${qs}`, [], logout),
+      apiFetch(`/oee-by-line?${qs}`, [], logout),
+      apiFetch(`/oee-trend?${qs}`, [], logout),
+      apiFetch(`/produksi-harian-summary?${qs}`, {}, logout),
+    ]).then(([c, l, t, s]) => {
+      setByCluster(c);
+      setByLine(l);
       setTrend(t);
-      // Field summary di sini dulu {availability, performance, yield, oee}
-      // dari /produksi-harian-summary -- oee-breakdown.overall punya nama
-      // field yang beda (avb/perf/yield/oee, sama dengan aggregateOee() di
-      // backend), dipetakan di sini supaya lossBreakdown & JSX di bawah
-      // (yang sudah pakai nama summary.availability dst) tidak perlu ikut
-      // diubah.
-      setSummary({ availability: b.overall.avb, performance: b.overall.perf, yield: b.overall.yield, oee: b.overall.oee });
+      setSummary(s);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [period, refDate, clusterFilter, logout]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Sub-judul kartu ikut filter Cluster yang aktif -- "OEE Cluster" jadi
+  // "OEE Cluster AD" kalau Cluster dipilih, "OEE Semua Cluster" kalau
+  // tidak. Sama pola dengan ARDetail.
+  const clusterLabel = clusterFilter === 'all' ? 'Semua Cluster' : `Cluster ${clusterFilter}`;
 
   const avgOee = byCluster.length ? Number((byCluster.reduce((s, c) => s + c.oee, 0) / byCluster.length).toFixed(1)) : 0;
   const trendWithTarget = useMemo(() => trend.map((d) => ({ ...d, target: 85 })), [trend]);
@@ -124,9 +124,14 @@ export default function OEEDetail() {
 
       <div className="row4" style={{ gridTemplateColumns: '0.95fr 0.95fr 1.3fr', marginBottom: 16, alignItems: 'stretch' }}>
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div className="card-header"><div className="card-title">OEE Cluster</div></div>
+          <div className="card-header"><div className="card-title">OEE {clusterLabel}</div></div>
           {loading ? (
-            <Skeleton width="100%" height={160} radius={8} />
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
+              <SkeletonCircle size={MAIN_SIZE} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {[0, 1, 2, 3].map((i) => <SkeletonCircle key={i} size={MINI_SIZE} />)}
+              </div>
+            </div>
           ) : byCluster.length === 0 ? (
             <div style={{ color: 'var(--muted)', fontSize: 12 }}>Belum ada data.</div>
           ) : (
@@ -145,9 +150,11 @@ export default function OEEDetail() {
         </div>
 
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div className="card-header"><div className="card-title">Breakdown OEE</div></div>
+          <div className="card-header"><div className="card-title">Breakdown OEE {clusterLabel}</div></div>
           {loading ? (
-            <Skeleton width="100%" height={160} radius={8} />
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <SkeletonCircle size={MAIN_SIZE} />
+            </div>
           ) : lossBreakdown.length === 0 ? (
             <div style={{ color: 'var(--muted)', fontSize: 12 }}>Belum ada data.</div>
           ) : (
@@ -159,42 +166,46 @@ export default function OEEDetail() {
 
         <div className="card">
           <div className="card-header">
-            <div className="card-title">Tren OEE</div>
+            <div className="card-title">Tren OEE {clusterLabel}</div>
           </div>
-          <LineTrendChart
-            title=""
-            data={trendWithTarget}
-            valueKey="oee"
-            targetKey="target"
-            color="#0e5a52"
-            unit="%"
-            showMovingAvg
-            movingAvgColor="var(--blue)"
-            targetColor="var(--red)"
-          />
+          {loading ? (
+            <SkeletonBlock height={220} />
+          ) : (
+            <LineTrendChart
+              title=""
+              data={trendWithTarget}
+              valueKey="oee"
+              targetKey="target"
+              color="#0e5a52"
+              unit="%"
+              showMovingAvg
+              movingAvgColor="var(--blue)"
+              targetColor="var(--red)"
+            />
+          )}
         </div>
       </div>
 
       <div className="row4" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 16, alignItems: 'stretch' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div className="card-header"><div className="card-title">5 Line Produksi OEE Tertinggi</div></div>
+            <div className="card-header"><div className="card-title">5 Line Produksi OEE Tertinggi — {clusterLabel}</div></div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <HorizontalBarList data={top5} mode="good" valueKey="oee" />
+              {loading ? <SkeletonRows rows={5} /> : <HorizontalBarList data={top5} mode="good" valueKey="oee" />}
             </div>
           </div>
           <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div className="card-header"><div className="card-title">5 Line Produksi OEE Terendah</div></div>
+            <div className="card-header"><div className="card-title">5 Line Produksi OEE Terendah — {clusterLabel}</div></div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <HorizontalBarList data={bottom5} mode="bad" valueKey="oee" />
+              {loading ? <SkeletonRows rows={5} /> : <HorizontalBarList data={bottom5} mode="bad" valueKey="oee" />}
             </div>
           </div>
         </div>
 
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div className="card-header"><div className="card-title">Tabel AVB / PERF / YIELD / OEE per Cluster</div></div>
+          <div className="card-header"><div className="card-title">Tabel AVB / PERF / YIELD / OEE per {clusterLabel}</div></div>
           {loading ? (
-            <TableSkeleton rows={5} columns={5} />
+            <SkeletonRows rows={4} />
           ) : byCluster.length === 0 ? (
             <div style={{ color: 'var(--muted)', fontSize: 12 }}>Belum ada data.</div>
           ) : (

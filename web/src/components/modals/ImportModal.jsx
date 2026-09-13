@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { FolderOpen, CheckCircle2 } from 'lucide-react';
-import Modal from '../ui/Modal.jsx';
+import Modal from '../Modal.jsx';
 import { useUI } from '../../contexts/UIContext.jsx';
 import { useApp } from '../../contexts/AppContext.jsx';
 import { useToast } from '../../contexts/ToastContext.jsx';

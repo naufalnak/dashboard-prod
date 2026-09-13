@@ -1,138 +1,114 @@
+// HTTP layer untuk domain Master Data -- tipis, cuma parse request &
+// panggil services/masterData.service.js. Business logic & query Prisma
+// ada di sana (lihat komentar di file itu).
 const express = require('express');
 const multer = require('multer');
-const { requireAuth } = require('../lib/auth');
+const requireAuth = require('../middlewares/requireAuth');
+const { requireFields, requireId } = require('../middlewares/validate');
 const masterDataService = require('../services/masterData.service');
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
 
-// ══════════════════════════════════════════════════════════════════════
-// Master data gabungan & lookup baca-saja
-// ══════════════════════════════════════════════════════════════════════
-
 // ── GET /api/master ────────────────────────────────────
-// Public — master data relasional lengkap untuk dropdown bertingkat di
-// form /rmo: Group Head → Cluster → Part Name → Proses (+Cycle Time,
-// Line Produksi, Mesin, Man Power).
 router.get('/master', async (req, res, next) => {
   try {
-    res.json(await masterDataService.getMasterData());
+    res.json(await masterDataService.getMaster());
   } catch (err) { next(err); }
 });
 
 // ── GET /api/legacy-lookups ─────────────────────────────
-// Login-gated — daftar nama mentah dari tabel lama "MP", "Mesin", "Proses",
-// "Nama Parts" (lihat catatan lengkap di masterData.service.js).
 router.get('/legacy-lookups', requireAuth, async (req, res, next) => {
   try {
     res.json(await masterDataService.getLegacyLookups());
   } catch (err) { next(err); }
 });
 
-// NOTE: GET /machines dipindah sepenuhnya ke machines.routes.js -- tidak
-// lagi didefinisikan di sini. (Sebelumnya sempat ada 2 definisi, yang di
-// sini "menang" karena masterData.routes.js di-mount duluan di
-// routes/index.js, jadi versi machines.routes.js jadi dead code tanpa
-// disadari -- lihat commit message untuk detail.)
-
-// ══════════════════════════════════════════════════════════════════════
-// Analisis silang Data Produksi ↔ Master Data (panel "perlu perhatian")
-// ══════════════════════════════════════════════════════════════════════
-
 // ── GET /api/produksi-partname-counts ──────────────────
 router.get('/produksi-partname-counts', requireAuth, async (req, res, next) => {
   try {
-    res.json(await masterDataService.getProduksiPartnameCounts());
+    res.json(await masterDataService.getProduksiPartNameCounts());
   } catch (err) { next(err); }
 });
 
 // ── GET /api/produksi-orphan-partnames ──────────────────
 router.get('/produksi-orphan-partnames', requireAuth, async (req, res, next) => {
   try {
-    res.json(await masterDataService.getProduksiOrphanPartnames());
+    res.json(await masterDataService.getOrphanPartNames());
   } catch (err) { next(err); }
 });
 
 // ── GET /api/master-partname-missing-finish ─────────────
 router.get('/master-partname-missing-finish', requireAuth, async (req, res, next) => {
   try {
-    res.json(await masterDataService.getPartnameMissingFinish());
+    res.json(await masterDataService.getMissingFinishPartNames());
   } catch (err) { next(err); }
 });
 
 // ── GET /api/master-partname-unused ──────────────────────
 router.get('/master-partname-unused', requireAuth, async (req, res, next) => {
   try {
-    res.json(await masterDataService.getPartnameUnused());
+    res.json(await masterDataService.getUnusedPartNames());
+  } catch (err) { next(err); }
+});
+
+// ── POST /api/master-part-name-delete ────────────────────
+router.post('/master-part-name-delete', requireAuth, requireId(), async (req, res, next) => {
+  try {
+    await masterDataService.deletePartName(req.validatedId);
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 
 // ── GET /api/master-proses-mesin-mismatch ────────────────
 router.get('/master-proses-mesin-mismatch', requireAuth, async (req, res, next) => {
   try {
-    res.json(await masterDataService.getProsesMesinMismatch());
+    res.json(await masterDataService.getMesinMismatch());
   } catch (err) { next(err); }
 });
 
 // ── POST /api/produksi-rename-partname ─────────────────
 router.post('/produksi-rename-partname', requireAuth, async (req, res, next) => {
   try {
-    const from = String(req.body.from || '').trim();
-    const to = String(req.body.to || '').trim();
-    if (!from || !to) return res.status(400).json({ error: 'from dan to wajib diisi' });
-    res.json(await masterDataService.renamePartName(from, to));
+    res.json(await masterDataService.renameProduksiPartName(req.body.from, req.body.to));
   } catch (err) { next(err); }
 });
-
-// ══════════════════════════════════════════════════════════════════════
-// Master Group Head (CRUD)
-// ══════════════════════════════════════════════════════════════════════
 
 router.post('/master-group-head', requireAuth, async (req, res, next) => {
   try {
-    const { name, cluster } = req.body;
-    if (!name || !cluster) return res.status(400).json({ error: 'name dan cluster wajib diisi' });
-    res.status(201).json(await masterDataService.upsertGroupHead({ name, cluster }));
+    res.status(201).json(await masterDataService.createGroupHead(req.body.name, req.body.cluster));
   } catch (err) { next(err); }
 });
+
 router.post('/master-group-head-update', requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.body.id);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
-    const record = await masterDataService.updateGroupHead(id, req.body);
-    if (!record) return res.status(404).json({ error: 'Not found' });
-    res.json(record);
+    res.json(await masterDataService.updateGroupHead(id, req.body));
   } catch (err) { next(err); }
 });
-router.post('/master-group-head-delete', requireAuth, async (req, res, next) => {
+
+router.post('/master-group-head-delete', requireAuth, requireId(), async (req, res, next) => {
   try {
-    const id = Number(req.body.id);
-    if (!id) return res.status(400).json({ error: 'Invalid id' });
-    await masterDataService.deleteGroupHead(id);
+    await masterDataService.deleteGroupHead(req.validatedId);
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
 
-// ══════════════════════════════════════════════════════════════════════
-// Master Man Power (CRUD)
-// ══════════════════════════════════════════════════════════════════════
-
 router.post('/master-man-power', requireAuth, async (req, res, next) => {
   try {
-    const { name, group_head } = req.body;
-    if (!name || !group_head) return res.status(400).json({ error: 'name dan group_head wajib diisi' });
-    res.status(201).json(await masterDataService.upsertManPower({ name, group_head }));
+    res.status(201).json(await masterDataService.createManPower(req.body.name, req.body.group_head));
   } catch (err) { next(err); }
 });
+
 router.post('/master-man-power-update', requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.body.id);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
-    const record = await masterDataService.updateManPower(id, req.body);
-    if (!record) return res.status(404).json({ error: 'Not found' });
-    res.json(record);
+    res.json(await masterDataService.updateManPower(id, req.body));
   } catch (err) { next(err); }
 });
+
 router.post('/master-man-power-delete', requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.body.id);
@@ -142,72 +118,34 @@ router.post('/master-man-power-delete', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ══════════════════════════════════════════════════════════════════════
-// Master Part Name (CRUD + delete guard + merge)
-// ══════════════════════════════════════════════════════════════════════
-
 router.post('/master-part-name', requireAuth, async (req, res, next) => {
   try {
-    const result = await masterDataService.upsertPartName(req.body);
-    if (result.status === 'invalid') return res.status(400).json({ error: 'part_name dan cluster wajib diisi' });
-    res.status(201).json(result.record);
+    res.status(201).json(await masterDataService.createPartName(req.body));
   } catch (err) { next(err); }
 });
+
 router.post('/master-part-name-update', requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.body.id);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
-    const record = await masterDataService.updatePartName(id, req.body);
-    if (!record) return res.status(404).json({ error: 'Not found' });
-    res.json(record);
+    res.json(await masterDataService.updatePartName(id, req.body));
   } catch (err) { next(err); }
 });
-// Login-gated — hapus satu Part Name Master Data. Ditolak (400) kalau
-// ternyata masih punya baris Proses atau data historis apa pun.
-router.post('/master-part-name-delete', requireAuth, async (req, res, next) => {
-  try {
-    const id = Number(req.body.id);
-    if (!id) return res.status(400).json({ error: 'Invalid id' });
-    const result = await masterDataService.deletePartName(id);
-    if (result.status === 'not_found') return res.status(404).json({ error: 'Not found' });
-    if (result.status === 'in_use') return res.status(400).json({ error: 'Part Name ini masih punya data, tidak bisa dihapus' });
-    res.json({ ok: true });
-  } catch (err) { next(err); }
-});
-// Gabungkan dua Part Name Master Data yang sebenarnya part yang sama --
-// lihat catatan lengkap di masterData.service.js#mergePartNames.
-router.post('/master-part-name-merge', requireAuth, async (req, res, next) => {
-  try {
-    const from = String(req.body.from || '').trim();
-    const to = String(req.body.to || '').trim();
-    if (!from || !to) return res.status(400).json({ error: 'from dan to wajib diisi' });
-    const result = await masterDataService.mergePartNames(from, to);
-    if (result.status === 'not_found') return res.status(404).json({ error: `Part Name "${result.which === 'from' ? from : to}" tidak ditemukan` });
-    if (result.status === 'same') return res.status(400).json({ error: 'from dan to adalah Part Name yang sama' });
-    res.json(result);
-  } catch (err) { next(err); }
-});
-
-// ══════════════════════════════════════════════════════════════════════
-// Master Proses (CRUD + import massal + tandai Proses Akhir/Finish)
-// ══════════════════════════════════════════════════════════════════════
 
 router.post('/master-proses', requireAuth, async (req, res, next) => {
   try {
-    const result = await masterDataService.createProses(req.body);
-    if (result.status === 'invalid') return res.status(400).json({ error: 'proses, part_name, dan mesin wajib diisi' });
-    res.status(201).json(result.record);
+    res.status(201).json(await masterDataService.createProses(req.body));
   } catch (err) { next(err); }
 });
+
 router.post('/master-proses-update', requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.body.id);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
-    const record = await masterDataService.updateProses(id, req.body);
-    if (!record) return res.status(404).json({ error: 'Not found' });
-    res.json(record);
+    res.json(await masterDataService.updateProses(id, req.body));
   } catch (err) { next(err); }
 });
+
 router.post('/master-proses-delete', requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.body.id);
@@ -216,90 +154,74 @@ router.post('/master-proses-delete', requireAuth, async (req, res, next) => {
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
-// Import massal Part Name + Proses dari file Excel yang di-parse di
-// FRONTEND -- lihat catatan lengkap di
-// masterData.service.js#importProsesFromRows.
+
+// ── POST /api/master-proses-import ──────────────────────
+// Import massal Part Name + Proses dari file Excel (di-parse di
+// FRONTEND, lihat web/src/importXlsx.js), dikirim sebagai array biasa
+// lewat JSON (bukan multipart).
 router.post('/master-proses-import', requireAuth, async (req, res, next) => {
   try {
-    const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
-    if (rows.length === 0) return res.status(400).json({ error: 'Tidak ada baris untuk diimport' });
-    res.json(await masterDataService.importProsesFromRows(rows));
+    res.json(await masterDataService.importProses(req.body.rows));
   } catch (err) { next(err); }
 });
-// Tandai/lepas status "Proses Akhir/Finish" satu baris Proses.
+
 router.post('/master-proses-set-finish', requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.body.id);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
     const value = req.body.value !== false;
-    const record = await masterDataService.setProsesFinish(id, value);
-    if (!record) return res.status(404).json({ error: 'Not found' });
-    res.json(record);
+    res.json(await masterDataService.setFinishProses(id, value));
   } catch (err) { next(err); }
 });
-// Gabungkan satu baris Proses (fromId) ke Part Name+Proses lain -- lihat
-// catatan lengkap di masterData.service.js#mergeProses.
+
+router.post('/master-part-name-merge', requireAuth, async (req, res, next) => {
+  try {
+    res.json(await masterDataService.mergePartName(req.body.from, req.body.to));
+  } catch (err) { next(err); }
+});
+
 router.post('/master-proses-merge', requireAuth, async (req, res, next) => {
   try {
-    const fromId = Number(req.body.from_id);
-    const toPartName = String(req.body.to_part_name || '').trim();
-    const toProses = String(req.body.to_proses || '').trim();
-    if (!fromId) return res.status(400).json({ error: 'from_id wajib diisi' });
-    if (!toPartName || !toProses) return res.status(400).json({ error: 'to_part_name dan to_proses wajib diisi' });
-    const result = await masterDataService.mergeProses(fromId, toPartName, toProses);
-    if (result.status === 'not_found') return res.status(404).json({ error: 'Baris Proses asal tidak ditemukan' });
-    if (result.status === 'target_not_found') return res.status(404).json({ error: `Part Name "${toPartName}" belum terdaftar di Master Data` });
-    if (result.status === 'same') return res.status(400).json({ error: 'Tujuan sama dengan Part Name+Proses asal' });
-    res.json(result);
+    res.json(await masterDataService.mergeProses(req.body.from_ids, req.body.to_part_name, req.body.to_proses));
   } catch (err) { next(err); }
 });
 
-// ══════════════════════════════════════════════════════════════════════
-// Master Kriteria NG (CRUD)
-// ══════════════════════════════════════════════════════════════════════
-
-router.post('/master-kriteria-ng', requireAuth, async (req, res, next) => {
+// Daftar Kriteria NG (jenis cacat) -- dipilih saat input Rejection.
+router.post('/master-kriteria-ng', requireAuth, requireFields(['nama']), async (req, res, next) => {
   try {
-    const { nama } = req.body;
-    if (!nama) return res.status(400).json({ error: 'nama wajib diisi' });
-    const result = await masterDataService.upsertKriteriaNg(nama);
-    res.status(201).json(result.record);
+    res.status(201).json(await masterDataService.createKriteriaNg(req.body.nama));
   } catch (err) { next(err); }
 });
+
 router.post('/master-kriteria-ng-update', requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.body.id);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
-    res.json(await masterDataService.updateKriteriaNg(id, req.body));
+    res.json(await masterDataService.updateKriteriaNg(id, req.body.nama));
   } catch (err) { next(err); }
 });
-router.post('/master-kriteria-ng-delete', requireAuth, async (req, res, next) => {
+
+router.post('/master-kriteria-ng-delete', requireAuth, requireId(), async (req, res, next) => {
   try {
-    const id = Number(req.body.id);
-    if (!id) return res.status(400).json({ error: 'Invalid id' });
-    await masterDataService.deleteKriteriaNg(id);
+    await masterDataService.deleteKriteriaNg(req.validatedId);
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
 
-// ══════════════════════════════════════════════════════════════════════
-// Master Overtime Target (CRUD)
-// ══════════════════════════════════════════════════════════════════════
-
 router.post('/master-overtime-target', requireAuth, async (req, res, next) => {
   try {
-    const result = await masterDataService.upsertOvertimeTarget(req.body);
-    if (result.status === 'invalid') return res.status(400).json({ error: 'year dan month (1-12) wajib diisi' });
-    res.status(201).json(result.record);
+    res.status(201).json(await masterDataService.createOvertimeTarget(req.body));
   } catch (err) { next(err); }
 });
+
 router.post('/master-overtime-target-update', requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.body.id);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
-    res.json(await masterDataService.updateOvertimeTarget(id, req.body));
+    res.json(await masterDataService.updateOvertimeTarget(id, req.body.target_hours));
   } catch (err) { next(err); }
 });
+
 router.post('/master-overtime-target-delete', requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.body.id);
@@ -309,17 +231,12 @@ router.post('/master-overtime-target-delete', requireAuth, async (req, res, next
   } catch (err) { next(err); }
 });
 
-// ══════════════════════════════════════════════════════════════════════
-// Master Shift Hours (CRUD)
-// ══════════════════════════════════════════════════════════════════════
-
 router.post('/master-shift-hours', requireAuth, async (req, res, next) => {
   try {
-    const result = await masterDataService.upsertShiftHours(req.body);
-    if (result.status === 'invalid') return res.status(400).json({ error: 'shift wajib diisi' });
-    res.status(201).json(result.record);
+    res.status(201).json(await masterDataService.createShiftHours(req.body.shift, req.body.default_hours));
   } catch (err) { next(err); }
 });
+
 router.post('/master-shift-hours-update', requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.body.id);
@@ -327,6 +244,7 @@ router.post('/master-shift-hours-update', requireAuth, async (req, res, next) =>
     res.json(await masterDataService.updateShiftHours(id, req.body));
   } catch (err) { next(err); }
 });
+
 router.post('/master-shift-hours-delete', requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.body.id);
@@ -336,15 +254,13 @@ router.post('/master-shift-hours-delete', requireAuth, async (req, res, next) =>
   } catch (err) { next(err); }
 });
 
-// ══════════════════════════════════════════════════════════════════════
-// Import CSV massal (Group Head + Part Name + Proses sekaligus)
-// ══════════════════════════════════════════════════════════════════════
-
 // ── POST /api/master/import ────────────────────────────
+// Login-gated — import CSV massal: Group Head, Cluster, Part Name, Cycle
+// Time, Proses, Line Produksi, Mesin, Man Power.
 router.post('/master-import', requireAuth, upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    res.json(await masterDataService.importMasterCsv(req.file.buffer.toString('utf-8')));
+    res.json(await masterDataService.importMasterCsv(req.file.buffer));
   } catch (err) { next(err); }
 });
 
