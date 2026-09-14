@@ -24,21 +24,21 @@ export default function MtbfMttrChart({ data, lineLabel, year, lines = [], mtbfL
         <LineTrendChart
           title={`MTBF${scope}`}
           data={data} valueKey="mtbf" targetKey="mtbfTarget"
-          color="#a855f7" unit="jam"
-          targetColor="#f0b429"
+          color="var(--purple)" unit="jam"
+          targetColor="var(--yellow)"
           legendItems={[
-            { type: 'dot', color: '#a855f7', label: 'MTBF (jam)' },
-            { type: 'line', color: '#f0b429', label: 'Target MTBF' },
+            { type: 'dot', color: 'var(--purple)', label: 'MTBF (jam)' },
+            { type: 'line', color: 'var(--yellow)', label: 'Target MTBF' },
           ]}
         />
         <LineTrendChart
           title={`MTTR${scope}`}
           data={data} valueKey="mttr" targetKey="mttrTarget"
-          color="#f0b429" overTargetColor="#ff4455" unit="jam"
-          targetColor="#f0b429"
+          color="var(--yellow)" overTargetColor="var(--red)" unit="jam"
+          targetColor="var(--yellow)"
           legendItems={[
-            { type: 'dot', color: '#f0b429', label: 'MTTR (jam)' },
-            { type: 'line', color: '#f0b429', label: 'Target ≤1 jam' },
+            { type: 'dot', color: 'var(--yellow)', label: 'MTTR (jam)' },
+            { type: 'line', color: 'var(--yellow)', label: 'Target ≤1 jam' },
           ]}
         />
       </div>

@@ -1,14 +1,21 @@
+// Business logic & query Prisma untuk domain Master Data (Part Name,
+// Proses, Group Head, Man Power, Kriteria NG, Overtime Target, Shift
+// Hours, legacy lookups, import CSV/Excel) -- dipindah dari
+// routes/masterData.routes.js.
 const prisma = require('../lib/prisma');
-const { parseCsv } = require('../utils/csv');
+const { upper } = require('../utils/formatters');
 
-// ══════════════════════════════════════════════════════════════════════
-// Master data gabungan & lookup baca-saja
-// ══════════════════════════════════════════════════════════════════════
+function httpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
 
+// ── GET /api/master ────────────────────────────────────
 // Public — master data relasional lengkap untuk dropdown bertingkat di
 // form /rmo: Group Head → Cluster → Part Name → Proses (+Cycle Time,
 // Line Produksi, Mesin, Man Power).
-async function getMasterData() {
+async function getMaster() {
   const [clusters, groupHeads, partNames, proses, manPower, kriteriaNg, overtimeTargets, shiftHours] = await Promise.all([
     prisma.masterCluster.findMany({ orderBy: { cluster: 'asc' } }),
     prisma.masterGroupHead.findMany({ orderBy: { name: 'asc' } }),
@@ -31,14 +38,10 @@ async function getMasterData() {
   };
 }
 
+// ── GET /api/legacy-lookups ─────────────────────────────
 // Login-gated — daftar nama mentah dari tabel lama "MP", "Mesin", "Proses",
 // "Nama Parts" yang dibuat manual di Supabase sebelum Master Data
-// relasional ada. Tabel-tabel itu cuma daftar nama datar tanpa relasi
-// (tidak tahu Part mana pakai Proses/Mesin/MP mana), jadi tidak bisa
-// auto-migrate ke MasterPartName/MasterProses. Dipakai sebagai saran
-// autocomplete (datalist) saja di menu Master Data supaya penamaan
-// konsisten dengan histori, sambil relasinya diisi manual sekali oleh
-// admin (yang tahu kombinasi aslinya di lapangan).
+// relasional ada. Dipakai sebagai saran autocomplete (datalist) saja.
 async function getLegacyLookups() {
   const [mp, mesin, proses, partNames] = await Promise.all([
     prisma.$queryRaw`SELECT "MP" AS name FROM "MP" ORDER BY "MP"`,
@@ -54,44 +57,21 @@ async function getLegacyLookups() {
   };
 }
 
-// Login-gated — daftar mesin dari tabel Machine (shared dengan
-// Dashboard-MTN, lihat model Machine di schema.prisma) buat dropdown Mesin
-// di Master Data -> Part Name & Proses. Cluster & Line ikut disertakan
-// supaya frontend bisa filter per Cluster & auto-isi Line Produksi begitu
-// Mesin dipilih (lihat /master-proses & /master-proses-update).
-async function getMachines() {
-  return prisma.machine.findMany({ orderBy: [{ cluster: 'asc' }, { machine: 'asc' }] });
-}
-
-// ══════════════════════════════════════════════════════════════════════
-// Analisis silang Data Produksi ↔ Master Data (panel "perlu perhatian")
-// ══════════════════════════════════════════════════════════════════════
-
+// ── GET /api/produksi-partname-counts ──────────────────
 // Login-gated — jumlah baris ProduksiHarian per kombinasi Part Name +
 // Proses, dipakai sebagai kolom "Jumlah Data" di Master Data -> Part
-// Name & Proses (supaya kelihatan baris Proses mana yang benar-benar
-// dipakai di data produksi, dan mana yang belum/tidak pernah kepakai).
-async function getProduksiPartnameCounts() {
-  const rows = await prisma.produksiHarian.groupBy({
-    by: ['partName', 'proses'],
-    _count: { _all: true },
-  });
+// Name & Proses.
+async function getProduksiPartNameCounts() {
+  const rows = await prisma.produksiHarian.groupBy({ by: ['partName', 'proses'], _count: { _all: true } });
   return rows.map((r) => ({ partName: r.partName, proses: r.proses, count: r._count._all }));
 }
 
+// ── GET /api/produksi-orphan-partnames ──────────────────
 // Login-gated — Part Name yang muncul di data ProduksiHarian historis
 // tapi TIDAK cocok (case-insensitive) dengan Part Name mana pun yang
-// sekarang ada di Master Data -- biasanya karena nama part diketik beda
-// (typo/variasi) sebelum katalog Master Data-nya dirapikan, nama Part
-// Name-nya sudah diganti di Master Data belakangan, atau memang Part
-// Name baru yang belum pernah didaftarkan sama sekali ke Master Data.
-// Dipakai supaya admin bisa menyamakan (rename) data lama itu ke nama
-// yang benar lewat renamePartName, ATAU -- kalau memang nama baru yang
-// valid -- langsung daftarkan ke Master Data lewat upsertPartName dengan
-// nama yang sama persis. `cluster` di sini cuma saran (Cluster paling
-// sering dipakai baris ProduksiHarian dengan nama ini), admin tetap bisa
-// pilih Cluster lain sebelum daftar baru.
-async function getProduksiOrphanPartnames() {
+// sekarang ada di Master Data. `cluster` di sini cuma saran (Cluster
+// paling sering dipakai baris ProduksiHarian dengan nama ini).
+async function getOrphanPartNames() {
   const [rows, masterParts] = await Promise.all([
     prisma.produksiHarian.groupBy({ by: ['partName', 'cluster'], _count: { _all: true } }),
     prisma.masterPartName.findMany({ select: { partName: true } }),
@@ -116,18 +96,11 @@ async function getProduksiOrphanPartnames() {
     .sort((a, b) => b.count - a.count);
 }
 
+// ── GET /api/master-partname-missing-finish ─────────────
 // Login-gated — Part Name di Master Data yang belum bisa dipakai buat
-// resolve Total OK Input Rejection: entah belum punya baris Proses sama
-// sekali, atau sudah punya Proses tapi belum ada satu pun yang ditandai
-// Proses Akhir/Finish (bintang). Dipakai sebagai panel "perlu perhatian"
-// di Master Data -> Part Name & Proses supaya tidak perlu menyisir
-// manual satu-satu di tabel yang panjang. Part Name yang sudah tidak
-// punya data historis SAMA SEKALI (ProduksiHarian/RejectionEntry/
-// ProblemLog) sengaja tidak ikut ditampilkan -- Total OK tidak pernah
-// dihitung untuk Part Name yang memang tidak dipakai, jadi tidak ada
-// yang perlu "dibereskan"; biasanya ini sisa Part Name lama yang sudah
-// diganti/dihapus dari data lapangan.
-async function getPartnameMissingFinish() {
+// resolve Total OK Input Rejection. Part Name yang sudah tidak punya data
+// historis SAMA SEKALI sengaja tidak ikut ditampilkan.
+async function getMissingFinishPartNames() {
   const [partNames, proses, produksiRows, rejectionRows, problemRows] = await Promise.all([
     prisma.masterPartName.findMany({ orderBy: { partName: 'asc' } }),
     prisma.masterProses.findMany({ select: { partName: true, isFinishProses: true } }),
@@ -157,15 +130,10 @@ async function getPartnameMissingFinish() {
     .sort((a, b) => a.partName.localeCompare(b.partName));
 }
 
+// ── GET /api/master-partname-unused ──────────────────────
 // Login-gated — Part Name di Master Data yang tidak punya baris Proses
-// SAMA SEKALI dan tidak direferensikan di data historis manapun
-// (ProduksiHarian/RejectionEntry/ProblemLog/PartReworkEntry) -- sisa
-// entri lama yang sudah diganti/dihapus dari data lapangan, tidak
-// termasuk Data Produksi. Dipakai panel "Part Name Tidak Terpakai" di
-// Master Data supaya bisa dibersihkan manual (lihat deletePartName),
-// terpisah dari panel "Belum Punya Proses Akhir/Finish" yang khusus Part
-// Name yang MASIH punya data tapi belum lengkap.
-async function getPartnameUnused() {
+// SAMA SEKALI dan tidak direferensikan di data historis manapun.
+async function getUnusedPartNames() {
   const [partNames, proses, produksiRows, rejectionRows, problemRows, reworkRows] = await Promise.all([
     prisma.masterPartName.findMany({ orderBy: { partName: 'asc' } }),
     prisma.masterProses.findMany({ select: { partName: true } }),
@@ -184,30 +152,57 @@ async function getPartnameUnused() {
     .sort((a, b) => a.partName.localeCompare(b.partName));
 }
 
-// Login-gated — baris Proses yang Mesin-nya (data lama, diketik manual
-// sebelum Tabel Machine dipakai sebagai katalog) TIDAK cocok dengan satu
-// pun baris di Machine -- dipakai sebagai panel "perlu koreksi manual" di
-// Master Data -> Part Name & Proses. Koreksi sesungguhnya (pilih Machine
-// yang benar) tetap dilakukan manual oleh admin lewat tombol Edit baris
-// itu (Mesin di form edit sudah wajib pilih dari Tabel Machine, lihat
-// updateProses) -- function ini cuma bantu menemukan baris mana saja
-// yang belum dikoreksi, bukan menebak sendiri koreksinya.
-async function getProsesMesinMismatch() {
+// ── POST /api/master-part-name-delete ────────────────────
+// Login-gated — hapus satu Part Name Master Data. Ditolak (400) kalau
+// ternyata masih punya baris Proses atau data historis apa pun -- dicek
+// ULANG di sini (bukan cuma percaya frontend).
+async function deletePartName(id) {
+  const existing = await prisma.masterPartName.findUnique({ where: { id } });
+  if (!existing) throw httpError(404, 'Not found');
+  const where = { partName: { equals: existing.partName, mode: 'insensitive' } };
+  const [prosesCount, produksiCount, rejectionCount, problemCount, reworkCount] = await Promise.all([
+    prisma.masterProses.count({ where }),
+    prisma.produksiHarian.count({ where }),
+    prisma.rejectionEntry.count({ where }),
+    prisma.problemLog.count({ where }),
+    prisma.partReworkEntry.count({ where }),
+  ]);
+  if (prosesCount + produksiCount + rejectionCount + problemCount + reworkCount > 0) {
+    throw httpError(400, 'Part Name ini masih punya data, tidak bisa dihapus');
+  }
+  await prisma.masterPartName.delete({ where: { id } });
+}
+
+// ── GET /api/master-proses-mesin-mismatch ────────────────
+// Login-gated — baris Proses yang Mesin-nya TIDAK cocok dengan satu pun
+// baris di Machine -- panel "perlu koreksi manual".
+async function getMesinMismatch() {
   const [prosesRows, machines] = await Promise.all([
     prisma.masterProses.findMany({ orderBy: [{ partName: 'asc' }, { proses: 'asc' }] }),
     prisma.machine.findMany({ select: { machine: true } }),
   ]);
   const machineSet = new Set(machines.map((m) => m.machine.toLowerCase().trim()));
   return prosesRows
-    .filter((p) => !p.mesin || !machineSet.has(p.mesin.toLowerCase().trim()))
+    .filter((p) => {
+      const mesin = (p.mesin || '').trim().toLowerCase();
+      // Mesin "Manual" = Proses sengaja tidak pakai mesin (dikerjakan
+      // tangan) -- bukan data lama yang perlu dikoreksi ke Tabel Machine,
+      // jadi dikecualikan dari panel ini.
+      if (mesin === 'manual') return false;
+      return !mesin || !machineSet.has(mesin);
+    })
     .map((p) => ({ id: p.id, partName: p.partName, proses: p.proses, cluster: p.cluster, mesin: p.mesin, line: p.line }));
 }
 
+// ── POST /api/produksi-rename-partname ─────────────────
 // Login-gated — ganti nama Part Name di semua data historis (Produksi
 // Harian, Rejection, Problem Log) yang masih pakai nama lama (`from`) ke
-// nama Part Name Master Data yang benar (`to`) -- match case-insensitive
-// biar tidak perlu sama persis huruf besar/kecil.
-async function renamePartName(from, to) {
+// nama Part Name Master Data yang benar (`to`).
+async function renameProduksiPartName(from, to) {
+  from = String(from || '').trim();
+  to = upper(to) || '';
+  if (!from || !to) throw httpError(400, 'from dan to wajib diisi');
+
   const where = { partName: { equals: from, mode: 'insensitive' } };
   const [produksi, rejection, problemLog] = await Promise.all([
     prisma.produksiHarian.updateMany({ where, data: { partName: to } }),
@@ -222,17 +217,15 @@ async function renamePartName(from, to) {
   };
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// Master Group Head (CRUD)
-// ══════════════════════════════════════════════════════════════════════
-
-async function upsertGroupHead({ name, cluster }) {
+async function createGroupHead(name, cluster) {
+  if (!name || !cluster) throw httpError(400, 'name dan cluster wajib diisi');
   return prisma.masterGroupHead.upsert({ where: { name }, update: { cluster }, create: { name, cluster } });
 }
 
-async function updateGroupHead(id, { name, cluster }) {
+async function updateGroupHead(id, body) {
   const existing = await prisma.masterGroupHead.findUnique({ where: { id } });
-  if (!existing) return null;
+  if (!existing) throw httpError(404, 'Not found');
+  const { name, cluster } = body;
   const data = {};
   if (name !== undefined) data.name = name;
   if (cluster !== undefined) data.cluster = cluster;
@@ -259,43 +252,37 @@ async function deleteGroupHead(id) {
   await prisma.masterGroupHead.delete({ where: { id } });
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// Master Man Power (CRUD) — roster per Group Head
-// ══════════════════════════════════════════════════════════════════════
-
 // Roster Man Power per Group Head -- name unik global, pindah shift/tempat
 // tinggal update field group_head-nya (bukan bikin baris baru).
-async function upsertManPower({ name, group_head }) {
-  return prisma.masterManPower.upsert({
-    where: { name }, update: { groupHead: group_head }, create: { name, groupHead: group_head },
-  });
+async function createManPower(name, groupHead) {
+  if (!name || !groupHead) throw httpError(400, 'name dan group_head wajib diisi');
+  return prisma.masterManPower.upsert({ where: { name }, update: { groupHead }, create: { name, groupHead } });
 }
 
-async function updateManPower(id, { name, group_head }) {
+async function updateManPower(id, body) {
   const existing = await prisma.masterManPower.findUnique({ where: { id } });
-  if (!existing) return null;
+  if (!existing) throw httpError(404, 'Not found');
+  const { name, group_head: groupHead } = body;
   const data = {};
   if (name !== undefined) data.name = name;
-  if (group_head !== undefined) data.groupHead = group_head;
+  if (groupHead !== undefined) data.groupHead = groupHead;
   const record = await prisma.masterManPower.update({ where: { id }, data });
 
   // Nama Man Power disnapshot ke ProduksiHarian.manPower & OvertimeEntry
   // (manPower/groupHead/cluster) saat entry dibuat -- kalau nama atau
-  // Grup Head-nya diganti di Master Data, baris historis ikut
-  // disamakan supaya grafik/tabel (ranking Overtime, dsb) langsung
-  // ikut, bukan terkunci ke nama/Grup Head lama.
+  // Grup Head-nya diganti di Master Data, baris historis ikut disamakan.
   if (name !== undefined && name !== existing.name) {
     await Promise.all([
       prisma.produksiHarian.updateMany({ where: { manPower: existing.name }, data: { manPower: name } }),
       prisma.overtimeEntry.updateMany({ where: { manPower: existing.name }, data: { manPower: name } }),
     ]);
   }
-  if (group_head !== undefined && group_head !== existing.groupHead) {
-    const gh = await prisma.masterGroupHead.findFirst({ where: { name: { equals: group_head, mode: 'insensitive' } } });
+  if (groupHead !== undefined && groupHead !== existing.groupHead) {
+    const gh = await prisma.masterGroupHead.findFirst({ where: { name: { equals: groupHead, mode: 'insensitive' } } });
     const effectiveName = name !== undefined ? name : existing.name;
     await prisma.overtimeEntry.updateMany({
       where: { manPower: effectiveName },
-      data: { groupHead: group_head, cluster: gh?.cluster || null },
+      data: { groupHead, cluster: gh?.cluster || null },
     });
   }
   return record;
@@ -305,47 +292,48 @@ async function deleteManPower(id) {
   await prisma.masterManPower.delete({ where: { id } });
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// Master Part Name (CRUD + delete guard + merge)
-// ══════════════════════════════════════════════════════════════════════
+// Cocokkan Nama Mesin (case-insensitive) ke tabel Machine (shared dgn
+// Dashboard-MTN) kalau ada yang cocok -- TIDAK lagi wajib ada di katalog
+// itu supaya edit/tambah Master Data tidak pernah gagal gara-gara data
+// lama yang Mesin-nya belum sempat dirapikan. Line Produksi TIDAK ikut
+// di-derive dari sini -- diisi manual terpisah oleh admin.
+async function resolveMachine(mesin) {
+  return prisma.machine.findFirst({ where: { machine: { equals: mesin, mode: 'insensitive' } } });
+}
 
 // Dicocokkan case-insensitive (bukan cuma exact match) supaya "collar
 // guide b6h" yang diketik ulang dengan huruf beda tidak bikin Part Name
-// duplikat baru -- nempel ke entri yang sudah ada (pakai kapitalisasi
-// yang sudah tersimpan), cuma cluster-nya yang diupdate.
-// part_name/proses/mesin/line/man_power dst DITRIM di sini (dan di
-// function Master Data lain) sebelum disimpan -- spasi tersisa di
-// depan/belakang (mis. dari copy-paste) bikin baris kelihatan sama tapi
-// sebenarnya beda persis di database, jadi gagal cocok di
-// mergePartNames dkk (pernah kejadian nyata: "Lwvwr cluth " vs "Lwvwr cluth").
-async function upsertPartName({ part_name, cluster, price, id_code }) {
-  const partName = String(part_name || '').trim();
-  if (!partName || !cluster) return { status: 'invalid' };
+// duplikat baru -- nempel ke entri yang sudah ada, cuma cluster-nya yang
+// diupdate. part_name dkk DITRIM sebelum disimpan -- spasi tersisa di
+// depan/belakang bikin baris kelihatan sama tapi sebenarnya beda persis
+// di database (pernah kejadian nyata: "Lwvwr cluth " vs "Lwvwr cluth").
+async function createPartName(body) {
+  const part_name = upper(body.part_name) || '';
+  const cluster = body.cluster;
+  const { price, id_code } = body;
+  if (!part_name || !cluster) throw httpError(400, 'part_name dan cluster wajib diisi');
   const existing = await prisma.masterPartName.findFirst({
-    where: { partName: { equals: partName, mode: 'insensitive' } },
+    where: { partName: { equals: part_name, mode: 'insensitive' } },
   });
   const priceData = price !== undefined ? { price: Number(price) || 0 } : {};
   const idCodeData = id_code !== undefined ? { idCode: id_code ? String(id_code).trim() || null : null } : {};
-  const record = existing
-    ? await prisma.masterPartName.update({ where: { id: existing.id }, data: { cluster, ...priceData, ...idCodeData } })
-    : await prisma.masterPartName.create({ data: { partName, cluster, ...priceData, ...idCodeData } });
-  return { status: 'ok', record };
+  return existing
+    ? prisma.masterPartName.update({ where: { id: existing.id }, data: { cluster, ...priceData, ...idCodeData } })
+    : prisma.masterPartName.create({ data: { partName: part_name, cluster, ...priceData, ...idCodeData } });
 }
 
-async function updatePartName(id, { part_name, cluster, price, id_code }) {
+async function updatePartName(id, body) {
+  const { part_name, cluster, price, id_code } = body;
   const existing = await prisma.masterPartName.findUnique({ where: { id } });
-  if (!existing) return null;
+  if (!existing) throw httpError(404, 'Not found');
   const data = {};
-  if (part_name !== undefined) data.partName = String(part_name).trim();
+  if (part_name !== undefined) data.partName = upper(part_name);
   if (cluster !== undefined) data.cluster = cluster;
   if (price !== undefined) data.price = Number(price) || 0;
   if (id_code !== undefined) data.idCode = id_code ? String(id_code).trim() || null : null;
   // partName di MasterProses/ProduksiHarian/RejectionEntry/ProblemLog
   // cuma string biasa (bukan foreign key), jadi kalau nama Part Name
-  // diganti harus ikut diupdate di semua baris turunannya -- supaya
-  // tidak jadi yatim (tidak muncul lagi di dropdown) DAN supaya
-  // grafik/tabel historis (AR, Rejection, Problem Log) langsung
-  // mengikuti nama terbaru, bukan terkunci ke nama lama.
+  // diganti harus ikut diupdate di semua baris turunannya.
   if (part_name !== undefined && part_name !== existing.partName) {
     await Promise.all([
       prisma.masterProses.updateMany({ where: { partName: existing.partName }, data: { partName: part_name } }),
@@ -354,14 +342,10 @@ async function updatePartName(id, { part_name, cluster, price, id_code }) {
       prisma.problemLog.updateMany({ where: { partName: existing.partName }, data: { partName: part_name } }),
     ]);
   }
-  // Cluster Part Name ini disnapshot ke RejectionEntry.cluster saat
-  // entry dibuat (RejectionEntry, beda dari ProduksiHarian.cluster yang
-  // ikut Cluster Grup Head, bukan Cluster Part Name) -- kalau Cluster-
-  // nya dikoreksi di Master Data, baris Rejection historis ikut
-  // disamakan supaya ring per-Cluster di Detail Rejection tidak
-  // kelihatan "kunci" ke Cluster lama. Price sengaja TIDAK dicascade --
-  // itu snapshot harga saat transaksi, bukan grouping key, jadi harus
-  // tetap historis akurat.
+  // Cluster Part Name ini disnapshot ke RejectionEntry.cluster saat entry
+  // dibuat -- kalau Cluster-nya dikoreksi di Master Data, baris Rejection
+  // historis ikut disamakan. Price sengaja TIDAK dicascade -- itu
+  // snapshot harga saat transaksi, bukan grouping key.
   if (cluster !== undefined && cluster !== existing.cluster) {
     const effectivePartName = part_name !== undefined ? part_name : existing.partName;
     await prisma.rejectionEntry.updateMany({ where: { partName: effectivePartName }, data: { cluster } });
@@ -369,131 +353,9 @@ async function updatePartName(id, { part_name, cluster, price, id_code }) {
   return prisma.masterPartName.update({ where: { id }, data });
 }
 
-// Login-gated — hapus satu Part Name Master Data. Ditolak kalau ternyata
-// masih punya baris Proses atau data historis apa pun -- dicek ULANG di
-// sini (bukan cuma percaya frontend), supaya tombol Hapus di panel "Part
-// Name Tidak Terpakai" tidak bisa dipakai untuk menghapus Part Name yang
-// sebenarnya masih dipakai (mis. race condition, atau dipanggil manual
-// lewat API tanpa lewat panel itu). Return discriminator status supaya
-// route bisa mutusin status code (404 vs 400) tanpa service nyentuh res.
-async function deletePartName(id) {
-  const existing = await prisma.masterPartName.findUnique({ where: { id } });
-  if (!existing) return { status: 'not_found' };
-  const where = { partName: { equals: existing.partName, mode: 'insensitive' } };
-  const [prosesCount, produksiCount, rejectionCount, problemCount, reworkCount] = await Promise.all([
-    prisma.masterProses.count({ where }),
-    prisma.produksiHarian.count({ where }),
-    prisma.rejectionEntry.count({ where }),
-    prisma.problemLog.count({ where }),
-    prisma.partReworkEntry.count({ where }),
-  ]);
-  if (prosesCount + produksiCount + rejectionCount + problemCount + reworkCount > 0) {
-    return { status: 'in_use' };
-  }
-  await prisma.masterPartName.delete({ where: { id } });
-  return { status: 'ok' };
-}
-
-// Gabungkan dua Part Name Master Data yang sebenarnya part yang sama tapi
-// kepencet jadi baris terpisah (typo/variasi ejaan, mis. "Pivot Chain Kzr"
-// vs "PIVOT CAM KZR") -- SEMUA baris Proses milik `from` dipindah ke `to`
-// apa adanya (tidak ada lagi drop-kalau-nama-Proses-sudah-ada, karena
-// satu Part Name+Proses sekarang boleh punya lebih dari satu baris),
-// semua data historis (Produksi, Rejection, Problem Log) ikut disamakan
-// namanya, lalu baris MasterPartName `from` dihapus. Dipakai dari panel
-// "Part Name Belum Punya Proses Akhir/Finish" saat Part Name yang belum
-// ada Proses Akhir-nya itu ternyata cuma variasi ejaan dari Part Name
-// lain yang sudah benar (bukan Part Name baru yang harus dilengkapi
-// Proses-nya sendiri).
-async function mergePartNames(from, to) {
-  const [fromPart, toPart] = await Promise.all([
-    prisma.masterPartName.findFirst({ where: { partName: { equals: from, mode: 'insensitive' } } }),
-    prisma.masterPartName.findFirst({ where: { partName: { equals: to, mode: 'insensitive' } } }),
-  ]);
-  if (!fromPart) return { status: 'not_found', which: 'from' };
-  if (!toPart) return { status: 'not_found', which: 'to' };
-  if (fromPart.id === toPart.id) return { status: 'same' };
-
-  const prosesMoved = await prisma.masterProses.updateMany({
-    where: { partName: { equals: fromPart.partName, mode: 'insensitive' } },
-    data: { partName: toPart.partName, cluster: toPart.cluster },
-  });
-
-  const where = { partName: { equals: fromPart.partName, mode: 'insensitive' } };
-  const [produksi, rejection, problemLog] = await Promise.all([
-    prisma.produksiHarian.updateMany({ where, data: { partName: toPart.partName } }),
-    prisma.rejectionEntry.updateMany({ where, data: { partName: toPart.partName } }),
-    prisma.problemLog.updateMany({ where, data: { partName: toPart.partName } }),
-  ]);
-
-  await prisma.masterPartName.delete({ where: { id: fromPart.id } });
-  await autoMarkSoleFinishProses(toPart.partName);
-
-  return {
-    status: 'ok',
-    merged: fromPart.partName,
-    into: toPart.partName,
-    prosesMoved: prosesMoved.count,
-    produksi: produksi.count,
-    rejection: rejection.count,
-    problemLog: problemLog.count,
-    total: produksi.count + rejection.count + problemLog.count,
-  };
-}
-
-// Gabungkan satu baris Proses (fromId) ke Part Name+Proses lain -- dipakai
-// kalau dua baris kelihatan beda ternyata sama, cuma beda ejaan/typo (mis.
-// "SEAT VALVE SPG 14777-K0J-N000"/"Auto Chamfer" seharusnya sama dengan
-// "SEAT VALVE SPRING KZR"/"Chamfer"). Beda dari mergePartNames (yang
-// menggabung SELURUH Part Name apa pun Proses-nya): ini scoped ke satu
-// baris Proses saja.
-//
-// Cuma ProduksiHarian yang punya kolom proses selain partName (Rejection/
-// ProblemLog/PartReworkEntry cuma punya partName, lihat schema.prisma) --
-// jadi cukup ProduksiHarian yang partName+proses-nya dipindahkan (bukan
-// dihapus, supaya data historisnya tetap ada, cuma "berpindah rumah").
-// Baris MasterProses asal dihapus sesudahnya, sehingga "Jumlah Data"-nya
-// otomatis jadi 0 (tidak ada lagi ProduksiHarian yang cocok ke Proses itu).
-async function mergeProses(fromId, toPartName, toProses) {
-  toPartName = String(toPartName || '').trim();
-  toProses = String(toProses || '').trim();
-  if (!fromId) return { status: 'invalid' };
-  if (!toPartName || !toProses) return { status: 'invalid' };
-
-  const fromRow = await prisma.masterProses.findUnique({ where: { id: Number(fromId) } });
-  if (!fromRow) return { status: 'not_found' };
-
-  const targetPart = await prisma.masterPartName.findFirst({ where: { partName: { equals: toPartName, mode: 'insensitive' } } });
-  if (!targetPart) return { status: 'target_not_found' };
-  if (fromRow.partName.toLowerCase() === targetPart.partName.toLowerCase() && fromRow.proses.toLowerCase() === toProses.toLowerCase()) {
-    return { status: 'same' };
-  }
-
-  const produksiMoved = await prisma.produksiHarian.updateMany({
-    where: { partName: { equals: fromRow.partName, mode: 'insensitive' }, proses: { equals: fromRow.proses, mode: 'insensitive' } },
-    data: { partName: targetPart.partName, proses: toProses },
-  });
-
-  await prisma.masterProses.delete({ where: { id: fromRow.id } });
-  await autoMarkSoleFinishProses(targetPart.partName);
-
-  return {
-    status: 'ok',
-    fromPartName: fromRow.partName,
-    fromProses: fromRow.proses,
-    produksi: produksiMoved.count,
-    into: { partName: targetPart.partName, proses: toProses },
-  };
-}
-
-// ══════════════════════════════════════════════════════════════════════
-// Master Proses (CRUD + import massal + tandai Proses Akhir/Finish)
-// ══════════════════════════════════════════════════════════════════════
-
 // Kalau Part Name cuma punya SATU baris Proses, tidak ada ambiguitas soal
-// mana yang "akhir/finish" -- tandai otomatis (dipakai sebagai Total OK
-// Input Rejection) tanpa perlu admin klik bintang manual. Cuma Part Name
-// dengan >1 Proses yang butuh penandaan manual (baru ada ambiguitas).
+// mana yang "akhir/finish" -- tandai otomatis tanpa perlu admin klik
+// manual. Cuma Part Name dengan >1 Proses yang butuh penandaan manual.
 async function autoMarkSoleFinishProses(partName) {
   if (!partName) return;
   const rows = await prisma.masterProses.findMany({ where: { partName } });
@@ -502,64 +364,55 @@ async function autoMarkSoleFinishProses(partName) {
   }
 }
 
-// Cocokkan Nama Mesin (case-insensitive) ke tabel Machine (shared dgn
-// Dashboard-MTN) kalau ada yang cocok -- TIDAK lagi wajib ada di katalog
-// itu supaya edit/tambah Master Data tidak pernah gagal gara-gara data
-// lama yang Mesin-nya belum sempat dirapikan (lihat panel "Mesin/Line
-// Belum Sesuai Tabel Machine"). Line Produksi TIDAK ikut di-derive dari
-// sini -- diisi manual terpisah oleh admin.
-async function resolveMachine(mesin) {
-  return prisma.machine.findFirst({ where: { machine: { equals: mesin, mode: 'insensitive' } } });
-}
-
-// Selalu bikin baris Proses baru (TIDAK lagi cari-atau-update berdasar
-// kombinasi Proses+Part Name) -- satu Part Name+Proses sekarang boleh
-// punya lebih dari satu baris (mis. beberapa pilihan Mesin), constraint
-// unique lama sudah dilepas dari schema (lihat migration
-// 20260813000000_drop_proses_partname_unique).
-async function createProses({ proses, part_name, mesin, line, man_power, cluster, cycle_time }) {
-  const prosesTrim = String(proses || '').trim();
-  const partNameTrim = String(part_name || '').trim();
-  const mesinTrim = String(mesin || '').trim();
-  const lineTrim = String(line || '').trim();
-  const manPowerTrim = String(man_power || '').trim();
-  if (!prosesTrim || !partNameTrim || !mesinTrim) return { status: 'invalid' };
-
+// Selalu bikin baris Proses baru (TIDAK cari-atau-update berdasar
+// kombinasi Proses+Part Name) -- satu Part Name+Proses boleh punya lebih
+// dari satu baris (mis. beberapa pilihan Mesin), constraint unique lama
+// sudah dilepas dari schema.
+async function createProses(body) {
+  const proses = String(body.proses || '').trim();
+  const part_name = upper(body.part_name) || '';
+  const mesin = String(body.mesin || '').trim();
+  const line = upper(body.line) || '';
+  const man_power = String(body.man_power || '').trim();
+  const { cluster, cycle_time } = body;
+  if (!proses || !part_name || !mesin) throw httpError(400, 'proses, part_name, dan mesin wajib diisi');
   const cycleTime = cycle_time ? Number(cycle_time) : 0;
-  const machine = await resolveMachine(mesinTrim);
+  const machine = await resolveMachine(mesin);
 
   const existingPart = await prisma.masterPartName.findFirst({
-    where: { partName: { equals: partNameTrim, mode: 'insensitive' } },
+    where: { partName: { equals: part_name, mode: 'insensitive' } },
   });
-  const resolvedPartName = existingPart?.partName || partNameTrim;
+  // upper(...) lagi di sini -- kalau existingPart kebetulan baris lama
+  // yang masih tersimpan huruf kecil (belum sempat kena normalisasi ini),
+  // baris Proses baru tetap dibuat dengan Part Name huruf besar.
+  const resolvedPartName = upper(existingPart?.partName || part_name);
   // Cluster baris Proses ini: kalau dikirim eksplisit pakai itu, kalau
-  // tidak jatuh balik ke Cluster milik Part Name-nya (mis. saat pertama
-  // kali dibuat dari form RC Harian / tab tambah Master Data).
+  // tidak jatuh balik ke Cluster milik Part Name-nya.
   const resolvedCluster = cluster || existingPart?.cluster || '';
 
   const record = await prisma.masterProses.create({
     data: {
-      proses: prosesTrim, partName: resolvedPartName, cluster: resolvedCluster, line: lineTrim,
-      mesin: machine ? machine.machine : mesinTrim, machineId: machine ? machine.id : null,
-      manPower: manPowerTrim, cycleTime,
+      proses, partName: resolvedPartName, cluster: resolvedCluster, line,
+      mesin: machine ? machine.machine : mesin, machineId: machine ? machine.id : null,
+      manPower: man_power, cycleTime,
     },
   });
   await autoMarkSoleFinishProses(resolvedPartName);
-  return { status: 'ok', record };
+  return record;
 }
 
-async function updateProses(id, { proses, part_name, cluster, mesin, line, man_power, cycle_time }) {
+async function updateProses(id, body) {
   const existing = await prisma.masterProses.findUnique({ where: { id } });
-  if (!existing) return null;
+  if (!existing) throw httpError(404, 'Not found');
+  const { proses, part_name, cluster, mesin, line, man_power, cycle_time } = body;
   const data = {};
   if (proses !== undefined) data.proses = String(proses).trim();
-  if (part_name !== undefined) data.partName = String(part_name).trim();
+  if (part_name !== undefined) data.partName = upper(part_name);
   if (cluster !== undefined) data.cluster = cluster;
-  // Line Produksi diisi manual, independen dari Mesin (tidak lagi
-  // ikut di-derive dari Machine.line).
-  if (line !== undefined) data.line = String(line).trim();
-  // Mesin SEBISA MUNGKIN dari Tabel Machine (dinormalisasi kalau
-  // cocok), tapi TIDAK lagi diblokir kalau belum ada di katalog.
+  // Line Produksi diisi manual, independen dari Mesin.
+  if (line !== undefined) data.line = upper(line);
+  // Mesin SEBISA MUNGKIN dari Tabel Machine (dinormalisasi kalau cocok),
+  // tapi TIDAK diblokir kalau belum ada di katalog.
   if (mesin !== undefined) {
     const mesinTrimmed = String(mesin).trim();
     const machine = await resolveMachine(mesinTrimmed);
@@ -569,16 +422,13 @@ async function updateProses(id, { proses, part_name, cluster, mesin, line, man_p
   if (man_power !== undefined) data.manPower = String(man_power).trim();
   if (cycle_time !== undefined) data.cycleTime = Number(cycle_time) || 0;
   // Sengaja cuma update baris Proses ini sendiri (by id) -- tidak pernah
-  // menyentuh MasterPartName, supaya mengedit satu baris tidak
-  // mempengaruhi baris Proses lain yang berbagi Part Name yang sama.
+  // menyentuh MasterPartName.
   const record = await prisma.masterProses.update({ where: { id }, data });
 
-  // Kalau nama Proses/Part Name/Line/Mesin baris ini diganti (mis.
-  // membetulkan "Boss series" -> "Boss Series"), baris ProduksiHarian
-  // historis yang sudah tercatat dengan kombinasi Part Name+Proses lama
-  // ikut disamakan -- supaya grafik/tabel (mis. ranking 5 Line AR
-  // Tertinggi/Terendah) langsung mengikuti Master Data terbaru, bukan
-  // "terkunci" ke nama lama yang sudah diedit.
+  // Kalau nama Proses/Part Name/Line/Mesin baris ini diganti, baris
+  // ProduksiHarian historis yang sudah tercatat dengan kombinasi Part
+  // Name+Proses lama ikut disamakan -- supaya grafik/tabel langsung
+  // mengikuti Master Data terbaru.
   const cascade = {};
   if (data.proses !== undefined && data.proses !== existing.proses) cascade.proses = data.proses;
   if (data.partName !== undefined && data.partName !== existing.partName) cascade.partName = data.partName;
@@ -598,37 +448,35 @@ async function deleteProses(id) {
   const existing = await prisma.masterProses.findUnique({ where: { id } });
   await prisma.masterProses.delete({ where: { id } });
   // Kalau Part Name ini sekarang tersisa cuma satu Proses (yang tadinya
-  // bukan finish), tandai otomatis -- lihat autoMarkSoleFinishProses.
+  // bukan finish), tandai otomatis.
   if (existing) await autoMarkSoleFinishProses(existing.partName);
 }
 
+// ── POST /api/master-proses-import ──────────────────────
 // Import massal Part Name + Proses -- baris di-parse dari file Excel di
-// FRONTEND (lihat web/src/importXlsx.js), dikirim ke sini sebagai array
-// objek biasa lewat JSON (bukan multipart), konsisten dengan pola flat-
-// endpoint/POST di seluruh domain ini. Satu baris file = satu baris
-// Proses BARU (selalu dibuat, sama seperti createProses -- TIDAK dicari-
-// atau-update berdasar Part Name+Proses yang sudah ada). Part Name yang
-// belum terdaftar otomatis dibuat (cari-atau-buat, idempotent). Baris
-// yang gagal validasi dilewati (tidak menggagalkan seluruh import),
-// dilaporkan lewat `errors`.
+// FRONTEND, dikirim sebagai array objek biasa lewat JSON. Satu baris file
+// = satu baris Proses BARU (selalu dibuat, sama seperti createProses --
+// TIDAK dicari-atau-update). Part Name yang belum terdaftar otomatis
+// dibuat (cari-atau-buat, idempotent). Baris yang gagal validasi
+// dilewati, dilaporkan lewat `errors`.
 // Ditulis sebagai operasi BULK (fetch katalog sekali, createMany sekali)
 // bukan loop per-baris dengan beberapa query masing-masing -- versi
-// per-baris (~5 query x N baris) kena timeout serverless Vercel untuk
-// file import ratusan baris ("signal timed out" di frontend). Konsekuensi:
-// kalau satu baris gagal karena alasan DB (bukan validasi field kosong,
-// yang sudah disaring duluan), seluruh import gagal (tidak lagi isolasi
-// per-baris seperti sebelumnya) -- trade-off yang diambil demi kecepatan,
-// karena kegagalan DB di luar validasi field sangat jarang terjadi.
-async function importProsesFromRows(rows) {
+// per-baris kena timeout serverless Vercel untuk file import ratusan
+// baris ("signal timed out"). Konsekuensi: kalau satu baris gagal karena
+// alasan DB (bukan validasi field kosong, yang sudah disaring duluan),
+// seluruh import gagal -- trade-off demi kecepatan.
+async function importProses(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) throw httpError(400, 'Tidak ada baris untuk diimport');
+
   const errors = [];
   const parsed = [];
   rows.forEach((r, i) => {
     r = r || {};
-    const partName = String(r.part_name || '').trim();
+    const partName = upper(r.part_name) || '';
     const cluster = String(r.cluster || '').trim().toUpperCase();
     const proses = String(r.proses || '').trim();
     const mesin = String(r.mesin || '').trim();
-    const line = String(r.line || '').trim();
+    const line = upper(r.line) || '';
     const idCode = String(r.id_code || '').trim();
     const cycleTime = Number(r.cycle_time) || 0;
     if (!partName || !cluster || !proses || !mesin) {
@@ -673,14 +521,16 @@ async function importProsesFromRows(rows) {
 
   // Ejaan Part Name yang benar-benar tersimpan (existing ATAU baru
   // dibuat barusan) -- dipakai supaya baris Proses konsisten dengan
-  // MasterPartName, sama seperti perilaku createProses.
+  // MasterPartName.
   const allParts = await prisma.masterPartName.findMany({ select: { partName: true } });
   const resolvedNameByLower = new Map(allParts.map((p) => [p.partName.toLowerCase(), p.partName]));
 
   let unmatchedMesin = 0;
   const prosesData = parsed.map((r) => {
     const machine = machineByLower.get(r.mesin.toLowerCase());
-    if (!machine) unmatchedMesin++;
+    // "Manual" sengaja tidak dihitung -- bukan mismatch yang perlu
+    // dikoreksi, lihat catatan di getMesinMismatch.
+    if (!machine && r.mesin.toLowerCase().trim() !== 'manual') unmatchedMesin++;
     return {
       proses: r.proses,
       partName: resolvedNameByLower.get(r.partName.toLowerCase()) || r.partName,
@@ -692,9 +542,8 @@ async function importProsesFromRows(rows) {
   });
   await prisma.masterProses.createMany({ data: prosesData });
 
-  // Tandai otomatis kalau suatu Part Name jadi tersisa cuma 1 Proses
-  // (lihat autoMarkSoleFinishProses) -- sekali per Part Name UNIK yang
-  // kesentuh import ini, bukan per baris file.
+  // Tandai otomatis kalau suatu Part Name jadi tersisa cuma 1 Proses --
+  // sekali per Part Name UNIK yang kesentuh import ini, bukan per baris.
   const touchedPartNames = [...new Set(prosesData.map((p) => p.partName))];
   await Promise.all(touchedPartNames.map((pn) => autoMarkSoleFinishProses(pn)));
 
@@ -704,11 +553,10 @@ async function importProsesFromRows(rows) {
 // Tandai/lepas status "Proses Akhir/Finish" satu baris Proses -- terpisah
 // dari updateProses karena perlu menyentuh baris Proses LAIN yang berbagi
 // Part Name yang sama (mematikan isFinishProses di baris lain saat satu
-// baris dinyalakan -- cuma boleh satu Proses Akhir per Part Name, dipakai
-// sebagai acuan Total OK Input Rejection).
-async function setProsesFinish(id, value) {
+// baris dinyalakan -- cuma boleh satu Proses Akhir per Part Name).
+async function setFinishProses(id, value) {
   const row = await prisma.masterProses.findUnique({ where: { id } });
-  if (!row) return null;
+  if (!row) throw httpError(404, 'Not found');
   if (value) {
     await prisma.masterProses.updateMany({
       where: { partName: row.partName, id: { not: id } },
@@ -718,18 +566,107 @@ async function setProsesFinish(id, value) {
   return prisma.masterProses.update({ where: { id }, data: { isFinishProses: value } });
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// Master Kriteria NG (CRUD) — jenis cacat dipilih saat input Rejection
-// ══════════════════════════════════════════════════════════════════════
+// Gabungkan dua Part Name Master Data yang sebenarnya part yang sama tapi
+// kepencet jadi baris terpisah (typo/variasi ejaan) -- SEMUA baris Proses
+// milik `from` dipindah ke `to` apa adanya, semua data historis ikut
+// disamakan namanya, lalu baris MasterPartName `from` dihapus.
+async function mergePartName(from, to) {
+  from = String(from || '').trim();
+  to = String(to || '').trim();
+  if (!from || !to) throw httpError(400, 'from dan to wajib diisi');
 
-async function upsertKriteriaNg(nama) {
-  if (!nama) return { status: 'invalid' };
-  const existing = await prisma.masterKriteriaNg.findFirst({ where: { nama: { equals: nama, mode: 'insensitive' } } });
-  const record = existing || await prisma.masterKriteriaNg.create({ data: { nama } });
-  return { status: 'ok', record };
+  const [fromPart, toPart] = await Promise.all([
+    prisma.masterPartName.findFirst({ where: { partName: { equals: from, mode: 'insensitive' } } }),
+    prisma.masterPartName.findFirst({ where: { partName: { equals: to, mode: 'insensitive' } } }),
+  ]);
+  if (!fromPart) throw httpError(404, `Part Name "${from}" tidak ditemukan`);
+  if (!toPart) throw httpError(404, `Part Name "${to}" tidak ditemukan`);
+  if (fromPart.id === toPart.id) throw httpError(400, 'from dan to adalah Part Name yang sama');
+
+  const prosesMoved = await prisma.masterProses.updateMany({
+    where: { partName: { equals: fromPart.partName, mode: 'insensitive' } },
+    data: { partName: toPart.partName, cluster: toPart.cluster },
+  });
+
+  const where = { partName: { equals: fromPart.partName, mode: 'insensitive' } };
+  const [produksi, rejection, problemLog] = await Promise.all([
+    prisma.produksiHarian.updateMany({ where, data: { partName: toPart.partName } }),
+    prisma.rejectionEntry.updateMany({ where, data: { partName: toPart.partName } }),
+    prisma.problemLog.updateMany({ where, data: { partName: toPart.partName } }),
+  ]);
+
+  await prisma.masterPartName.delete({ where: { id: fromPart.id } });
+  await autoMarkSoleFinishProses(toPart.partName);
+
+  return {
+    merged: fromPart.partName,
+    into: toPart.partName,
+    prosesMoved: prosesMoved.count,
+    produksi: produksi.count,
+    rejection: rejection.count,
+    problemLog: problemLog.count,
+    total: produksi.count + rejection.count + problemLog.count,
+  };
 }
 
-async function updateKriteriaNg(id, { nama }) {
+// Gabungkan satu grup Part Name+Proses (fromIds = id semua baris
+// MasterProses miliknya, bisa lebih dari satu kalau punya beberapa pilihan
+// Mesin) ke Part Name+Proses lain -- dipakai kalau dua baris yang
+// kelihatan beda ternyata sama, cuma beda ejaan/typo (mis. "SEAT VALVE
+// SPG 14777-K0J-N000"/"Auto Chamfer" seharusnya sama dengan "SEAT VALVE
+// SPRING KZR"/"Chamfer"). Beda dari mergePartName (yang menggabung SELURUH
+// Part Name apa pun Proses-nya): ini scoped ke satu kombinasi Proses saja,
+// jadi kombinasi Part Name+Proses lain milik Part Name yang sama TIDAK
+// ikut kepindah.
+//
+// Cuma ProduksiHarian yang punya kolom proses selain partName (Rejection/
+// ProblemLog/PartReworkEntry cuma punya partName, lihat schema.prisma) --
+// jadi cukup ProduksiHarian yang partName+proses-nya dipindahkan (bukan
+// dihapus, supaya data historisnya tetap ada, cuma "berpindah rumah").
+// Baris MasterProses asal dihapus sesudahnya, sehingga "Jumlah Data"-nya
+// otomatis jadi 0 (tidak ada lagi ProduksiHarian yang cocok ke Proses itu).
+async function mergeProses(fromIds, toPartName, toProses) {
+  toPartName = String(toPartName || '').trim();
+  toProses = String(toProses || '').trim();
+  if (!Array.isArray(fromIds) || fromIds.length === 0) throw httpError(400, 'from_ids wajib diisi');
+  if (!toPartName || !toProses) throw httpError(400, 'to_part_name dan to_proses wajib diisi');
+
+  const fromRows = await prisma.masterProses.findMany({ where: { id: { in: fromIds.map(Number) } } });
+  if (fromRows.length === 0) throw httpError(404, 'Baris Proses asal tidak ditemukan');
+  const { partName: fromPartName, proses: fromProses } = fromRows[0];
+  const sameGroup = fromRows.every((r) =>
+    r.partName.toLowerCase() === fromPartName.toLowerCase() && r.proses.toLowerCase() === fromProses.toLowerCase());
+  if (!sameGroup) throw httpError(400, 'Semua baris asal harus dari satu grup Part Name+Proses yang sama');
+
+  const targetPart = await prisma.masterPartName.findFirst({ where: { partName: { equals: toPartName, mode: 'insensitive' } } });
+  if (!targetPart) throw httpError(404, `Part Name "${toPartName}" belum terdaftar di Master Data`);
+  if (fromPartName.toLowerCase() === targetPart.partName.toLowerCase() && fromProses.toLowerCase() === toProses.toLowerCase()) {
+    throw httpError(400, 'Tujuan sama dengan Part Name+Proses asal');
+  }
+
+  const produksiMoved = await prisma.produksiHarian.updateMany({
+    where: { partName: { equals: fromPartName, mode: 'insensitive' }, proses: { equals: fromProses, mode: 'insensitive' } },
+    data: { partName: targetPart.partName, proses: toProses },
+  });
+
+  await prisma.masterProses.deleteMany({ where: { id: { in: fromRows.map((r) => r.id) } } });
+  await autoMarkSoleFinishProses(targetPart.partName);
+
+  return {
+    fromPartName, fromProses,
+    mesinMoved: fromRows.length,
+    produksi: produksiMoved.count,
+    into: { partName: targetPart.partName, proses: toProses },
+  };
+}
+
+// Daftar Kriteria NG (jenis cacat) -- dipilih saat input Rejection.
+async function createKriteriaNg(nama) {
+  const existing = await prisma.masterKriteriaNg.findFirst({ where: { nama: { equals: nama, mode: 'insensitive' } } });
+  return existing || prisma.masterKriteriaNg.create({ data: { nama } });
+}
+
+async function updateKriteriaNg(id, nama) {
   const data = {};
   if (nama !== undefined) data.nama = nama;
   return prisma.masterKriteriaNg.update({ where: { id }, data });
@@ -739,28 +676,23 @@ async function deleteKriteriaNg(id) {
   await prisma.masterKriteriaNg.delete({ where: { id } });
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// Master Overtime Target (CRUD) — target jam lembur per bulan
-// ══════════════════════════════════════════════════════════════════════
-
 // Target jam lembur per bulan -- upsert (cari-atau-buat) berdasar
 // year+month, karena kombinasi itu unik (satu target per bulan).
-async function upsertOvertimeTarget({ year, month, target_hours }) {
-  const yearNum = Number(year);
-  const monthNum = Number(month);
-  if (!yearNum || !monthNum || monthNum < 1 || monthNum > 12) return { status: 'invalid' };
-  const targetHours = Number(target_hours) || 0;
-  const record = await prisma.masterOvertimeTarget.upsert({
-    where: { year_month: { year: yearNum, month: monthNum } },
+async function createOvertimeTarget(body) {
+  const year = Number(body.year);
+  const month = Number(body.month);
+  const targetHours = Number(body.target_hours) || 0;
+  if (!year || !month || month < 1 || month > 12) throw httpError(400, 'year dan month (1-12) wajib diisi');
+  return prisma.masterOvertimeTarget.upsert({
+    where: { year_month: { year, month } },
     update: { targetHours },
-    create: { year: yearNum, month: monthNum, targetHours },
+    create: { year, month, targetHours },
   });
-  return { status: 'ok', record };
 }
 
-async function updateOvertimeTarget(id, { target_hours }) {
+async function updateOvertimeTarget(id, targetHoursRaw) {
   const data = {};
-  if (target_hours !== undefined) data.targetHours = Number(target_hours) || 0;
+  if (targetHoursRaw !== undefined) data.targetHours = Number(targetHoursRaw) || 0;
   return prisma.masterOvertimeTarget.update({ where: { id }, data });
 }
 
@@ -768,26 +700,20 @@ async function deleteOvertimeTarget(id) {
   await prisma.masterOvertimeTarget.delete({ where: { id } });
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// Master Shift Hours (CRUD) — default Waktu Efektif (jam) per Shift
-// ══════════════════════════════════════════════════════════════════════
-
 // Default Waktu Efektif (jam) per Shift -- upsert (cari-atau-buat)
 // berdasar nama shift, karena shift itu unik.
-async function upsertShiftHours({ shift, default_hours }) {
-  if (!shift) return { status: 'invalid' };
-  const record = await prisma.masterShiftHours.upsert({
-    where: { shift },
-    update: { defaultHours: Number(default_hours) || 0 },
-    create: { shift, defaultHours: Number(default_hours) || 0 },
+async function createShiftHours(shift, defaultHoursRaw) {
+  if (!shift) throw httpError(400, 'shift wajib diisi');
+  const defaultHours = Number(defaultHoursRaw) || 0;
+  return prisma.masterShiftHours.upsert({
+    where: { shift }, update: { defaultHours }, create: { shift, defaultHours },
   });
-  return { status: 'ok', record };
 }
 
-async function updateShiftHours(id, { shift, default_hours }) {
+async function updateShiftHours(id, body) {
   const data = {};
-  if (shift !== undefined) data.shift = shift;
-  if (default_hours !== undefined) data.defaultHours = Number(default_hours) || 0;
+  if (body.shift !== undefined) data.shift = body.shift;
+  if (body.default_hours !== undefined) data.defaultHours = Number(body.default_hours) || 0;
   return prisma.masterShiftHours.update({ where: { id }, data });
 }
 
@@ -795,15 +721,62 @@ async function deleteShiftHours(id) {
   await prisma.masterShiftHours.delete({ where: { id } });
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// Import CSV massal (Group Head + Part Name + Proses sekaligus)
-// ══════════════════════════════════════════════════════════════════════
+// Minimal CSV parser supporting quoted fields with embedded commas/newlines,
+// auto-detect delimiter (comma/semicolon/tab) dari baris header.
+function parseCsv(text) {
+  const firstLine = text.split(/\r?\n/)[0] || '';
+  const commas = (firstLine.match(/,/g) || []).length;
+  const semis = (firstLine.match(/;/g) || []).length;
+  const tabs = (firstLine.match(/\t/g) || []).length;
+  const delim = tabs > commas && tabs > semis ? '\t' : semis > commas ? ';' : ',';
 
-// Login-gated — import CSV massal: Group Head, Cluster, Part Name,
-// Cycle Time, Proses, Line Produksi, Mesin, Man Power. Tiap baris mengisi
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inQuotes) {
+      if (char === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else {
+        field += char;
+      }
+    } else if (char === '"') {
+      inQuotes = true;
+    } else if (char === delim) {
+      row.push(field); field = '';
+    } else if (char === '\n' || char === '\r') {
+      if (char === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); field = '';
+      if (row.some((c) => c.trim() !== '')) rows.push(row);
+      row = [];
+    } else {
+      field += char;
+    }
+  }
+  if (field !== '' || row.length) {
+    row.push(field);
+    if (row.some((c) => c.trim() !== '')) rows.push(row);
+  }
+
+  if (!rows.length) return [];
+  const headers = rows[0].map((h) => h.trim());
+  return rows.slice(1).map((r) => {
+    const obj = {};
+    headers.forEach((h, idx) => { obj[h] = (r[idx] ?? '').trim(); });
+    return obj;
+  });
+}
+
+// ── POST /api/master/import ────────────────────────────
+// Login-gated — import CSV massal: Group Head, Cluster, Part Name, Cycle
+// Time, Proses, Line Produksi, Mesin, Man Power. Tiap baris mengisi
 // ketiga tabel master (upsert, aman dijalankan berulang).
-async function importMasterCsv(fileBufferText) {
-  const rows = parseCsv(fileBufferText);
+async function importMasterCsv(fileBuffer) {
+  const rows = parseCsv(fileBuffer.toString('utf-8'));
 
   let groupHeads = 0, partNames = 0, prosesRows = 0, skipped = 0;
   for (const row of rows) {
@@ -819,9 +792,9 @@ async function importMasterCsv(fileBufferText) {
 
     const cluster = field('Cluster').toUpperCase();
     const groupHead = field('Group Head', 'Grup Head');
-    const partName = field('Part Name', 'Nama Part');
+    const partName = upper(field('Part Name', 'Nama Part')) || '';
     const proses = field('Proses');
-    const line = field('Line Produksi', 'Line');
+    const line = upper(field('Line Produksi', 'Line')) || '';
     const mesin = field('Mesin', 'Nama Mesin');
     const manPower = field('Man Power', 'MP');
     const cycleTimeRaw = field('Cycle Time', 'CT');
@@ -855,38 +828,37 @@ async function importMasterCsv(fileBufferText) {
 }
 
 module.exports = {
-  getMasterData,
+  getMaster,
   getLegacyLookups,
-  getMachines,
-  getProduksiPartnameCounts,
-  getProduksiOrphanPartnames,
-  getPartnameMissingFinish,
-  getPartnameUnused,
-  getProsesMesinMismatch,
-  renamePartName,
-  upsertGroupHead,
+  getProduksiPartNameCounts,
+  getOrphanPartNames,
+  getMissingFinishPartNames,
+  getUnusedPartNames,
+  deletePartName,
+  getMesinMismatch,
+  renameProduksiPartName,
+  createGroupHead,
   updateGroupHead,
   deleteGroupHead,
-  upsertManPower,
+  createManPower,
   updateManPower,
   deleteManPower,
-  upsertPartName,
+  createPartName,
   updatePartName,
-  deletePartName,
-  mergePartNames,
-  mergeProses,
   createProses,
   updateProses,
   deleteProses,
-  importProsesFromRows,
-  setProsesFinish,
-  upsertKriteriaNg,
+  importProses,
+  setFinishProses,
+  mergePartName,
+  mergeProses,
+  createKriteriaNg,
   updateKriteriaNg,
   deleteKriteriaNg,
-  upsertOvertimeTarget,
+  createOvertimeTarget,
   updateOvertimeTarget,
   deleteOvertimeTarget,
-  upsertShiftHours,
+  createShiftHours,
   updateShiftHours,
   deleteShiftHours,
   importMasterCsv,

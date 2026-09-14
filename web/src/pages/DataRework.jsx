@@ -1,23 +1,21 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { RefreshCw, X, Pencil, Trash2 } from 'lucide-react';
-import Combobox from '../components/ui/Combobox.jsx';
-import SortTh from '../components/ui/SortTh.jsx';
-import ZoomCell from '../components/ui/ZoomCell.jsx';
-import Pagination from '../components/ui/Pagination.jsx';
-import EmptyErrorState from '../components/ui/EmptyErrorState.jsx';
-import { TableRowsSkeleton } from '../components/ui/Skeleton.jsx';
-import PeriodPicker from '../components/maintenance/PeriodPicker.jsx';
-import { useSort } from '../hooks/useSort.js';
-import { useColumnWidths, weightsToPercent } from '../hooks/useColumnWidths.js';
-import useHorizontalWheelScroll from '../hooks/useHorizontalWheelScroll.js';
+import Combobox from '../components/Combobox.jsx';
+import SortTh from '../components/SortTh.jsx';
+import ZoomCell from '../components/ZoomCell.jsx';
+import PeriodPicker from '../components/PeriodPicker.jsx';
+import { useSort } from '../useSort.js';
+import { useColumnWidths, weightsToPercent } from '../useColumnWidths.js';
+import useHorizontalWheelScroll from '../useHorizontalWheelScroll.js';
 import { formatDateID } from '../dateFmt.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { fetchMaster } from '../services/masterService.js';
-import { fetchPartReworkEntries, updatePartRework, deletePartRework } from '../services/reworkService.js';
-import { usePaginatedList, PAGE_SIZE } from '../hooks/usePaginatedList.js';
+import { apiFetch, apiSend } from '../api.js';
 import { useToast } from '../contexts/ToastContext.jsx';
 import { useConfirm } from '../contexts/ConfirmContext.jsx';
 import { isReadOnlyUser } from '../roles.js';
+import { Skeleton } from '../components/Skeleton.jsx';
+
+const CLUSTERS = ['AD', 'BC', 'EF', 'FI'];
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
@@ -110,7 +108,7 @@ function EditReworkModal({ row, master, onClose, onSaved }) {
   async function save() {
     setBusy(true);
     try {
-      await updatePartRework({
+      await apiSend('/part-rework-update', 'POST', {
         id: row.id,
         tanggal_ditemukan: form.tanggalDitemukan, no_lot_original: form.noLotOriginal,
         tanggal_repair: form.tanggalRepair, part_name: form.partName,
@@ -181,40 +179,44 @@ export default function DataRework() {
   const readOnly = isReadOnlyUser(username);
   const showToast = useToast();
   const confirm = useConfirm();
-  const [period, setPeriod]   = useState('today');
+  // Default "month" (bukan "today") -- Tanggal Ditemukan dan Tanggal
+  // Repair pada satu baris Rework biasanya beda beberapa hari, jadi
+  // filter "Harian" sering bikin baris yang baru saja diproses jadi
+  // kelihatan "hilang" padahal cuma beda tanggal filter.
+  const [period, setPeriod]   = useState('month');
   const [refDate, setRefDate] = useState(todayStr());
+  const [clusterFilter, setClusterFilter] = useState('all');
   const [query, setQuery]     = useState('');
+  const [rows, setRows]       = useState([]);
   const [master, setMaster]   = useState({ partNames: [], groupHeads: [], proses: [] });
+  const [loading, setLoading] = useState(false);
   const [editRow, setEditRow] = useState(null);
 
-  const {
-    rows, page, setPage, totalPages, total, loading, error, reload: load,
-  } = usePaginatedList(
-    fetchPartReworkEntries,
-    (p, pageSize) => `period=${period}&date=${refDate}&page=${p}&pageSize=${pageSize}`,
-    [period, refDate],
-  );
+  const load = useCallback(() => {
+    setLoading(true);
+    apiFetch(`/part-rework-entries?period=${period}&date=${refDate}`, [], logout).then((data) => {
+      setRows(data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [period, refDate, logout]);
 
+  useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    fetchMaster({ partNames: [], groupHeads: [], proses: [] }, logout).then(setMaster);
+    apiFetch('/master', { partNames: [], groupHeads: [], proses: [] }, logout).then(setMaster);
   }, [logout]);
 
-  useEffect(() => { setPage(1); }, [period, refDate]);
-
-  // Catatan: pencarian ini filter lokal, hanya menyaring baris di halaman
-  // yang lagi tampil (lihat Pagination di bawah tabel) -- bukan pencarian
-  // ke semua data.
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      (r.partName || '').toLowerCase().includes(q) ||
-      (r.grupHead || '').toLowerCase().includes(q) ||
-      (r.cluster || '').toLowerCase().includes(q) ||
-      (r.noLotRework || '').toLowerCase().includes(q) ||
-      (r.noLotOriginal || '').toLowerCase().includes(q),
-    );
-  }, [rows, query]);
+    return rows.filter((r) => {
+      if (clusterFilter !== 'all' && r.cluster !== clusterFilter) return false;
+      if (!q) return true;
+      return (r.partName || '').toLowerCase().includes(q) ||
+        (r.grupHead || '').toLowerCase().includes(q) ||
+        (r.cluster || '').toLowerCase().includes(q) ||
+        (r.noLotRework || '').toLowerCase().includes(q) ||
+        (r.noLotOriginal || '').toLowerCase().includes(q);
+    });
+  }, [rows, query, clusterFilter]);
 
   const defaultSorted = useMemo(
     () => [...filteredRows].sort((a, b) => (b.tanggalRepair || '').localeCompare(a.tanggalRepair || '')),
@@ -227,7 +229,7 @@ export default function DataRework() {
   async function handleDelete(row) {
     if (!(await confirm(`Hapus data Rework ${row.partName} (${row.noLotRework})?`))) return;
     try {
-      await deletePartRework(row.id, logout);
+      await apiSend('/part-rework-delete', 'POST', { id: row.id }, logout);
       showToast('Data berhasil dihapus', 'green');
       load();
     } catch (e) { showToast(e.message, 'red'); }
@@ -245,6 +247,15 @@ export default function DataRework() {
         <span className="group-box-title">Apply Filters</span>
         <div className="dash-filter-bar" style={{ flexWrap: 'wrap' }}>
           <PeriodPicker pill period={period} setPeriod={setPeriod} refDate={refDate} setRefDate={setRefDate} />
+          <select
+            value={clusterFilter}
+            onChange={(e) => setClusterFilter(e.target.value)}
+            className="pp-select"
+            style={{ height: 34 }}
+          >
+            <option value="all">Semua Cluster</option>
+            {CLUSTERS.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
           <input
             type="text"
             placeholder="Cari Part Name / Grup Head / Cluster / No Lot…"
@@ -256,6 +267,9 @@ export default function DataRework() {
           <button className="btn-icon" title="Refresh data" onClick={load}>
             <RefreshCw size={14} />
           </button>
+          <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>
+            {shown.length.toLocaleString()} baris
+          </span>
         </div>
       </div>
 
@@ -276,9 +290,9 @@ export default function DataRework() {
             </thead>
             <tbody>
               {loading && rows.length === 0 ? (
-                <TableRowsSkeleton rows={6} colSpan={18} />
+                <tr><td colSpan={18} style={td}><Skeleton height={12} width="60%" /></td></tr>
               ) : shown.length === 0 ? (
-                <EmptyErrorState as="row" colSpan={18} status={error ? 'error' : 'empty'} onRetry={load} emptyText={rows.length === 0 ? 'Belum ada data.' : 'Tidak ada yang cocok.'} />
+                <tr><td colSpan={18} style={td}>{rows.length === 0 ? 'Belum ada data.' : 'Tidak ada yang cocok.'}</td></tr>
               ) : shown.map((r) => (
                 <tr key={r.id}>
                   <td style={{ ...td, position: 'sticky', left: 0, background: 'var(--s1)' }}>
@@ -311,8 +325,6 @@ export default function DataRework() {
             </tbody>
           </table>
         </div>
-
-        <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onPageChange={setPage} disabled={loading} />
       </div>
 
       {editRow && (

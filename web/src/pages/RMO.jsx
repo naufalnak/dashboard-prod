@@ -3,7 +3,7 @@ import { CheckCircle2, ClipboardList } from 'lucide-react';
 import { useApp } from '../contexts/AppContext.jsx';
 import { useToast } from '../contexts/ToastContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { reportBreakdown } from '../services/masterService.js';
+import { apiSend } from '../api.js';
 import { fmtDate } from '../utils/fmt.js';
 
 function nowTime() {
@@ -94,7 +94,7 @@ export default function RMO() {
 
     setBusy(true);
     try {
-      await reportBreakdown({
+      await apiSend('/breakdown', 'POST', {
         machine_code: m, breakdown_date: date, start_time: start,
         failure_cause: c, failure_category: 'Mechanical', pic_gh: picGh, severity: 'warning',
       }, logout);

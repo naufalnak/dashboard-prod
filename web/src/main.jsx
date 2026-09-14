@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
-import RMOPublic from './pages/RMOPublic.jsx';
+import RMOPublic from './pages/RMOPublic/index.jsx';
 import MaintenanceMode from './pages/MaintenanceMode.jsx';
 import { MAINTENANCE_MODE } from './maintenanceFlag.js';
 

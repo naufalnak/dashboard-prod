@@ -1,7 +1,7 @@
-// Restricts access by client IPv4 address/CIDR. No-op when ALLOWED_IPS is
-// unset, so local dev and any deploy that hasn't configured it are unaffected.
 const { ALLOWED_IPS } = require('../config/env');
 
+// Restricts access by client IPv4 address/CIDR. No-op when ALLOWED_IPS is
+// unset, so local dev and any deploy that hasn't configured it are unaffected.
 function ipInCidr(ip, cidr) {
   const [range, bits] = cidr.split('/');
   if (!bits) return ip === range;
@@ -11,10 +11,11 @@ function ipInCidr(ip, cidr) {
 }
 
 function ipAllowlist(req, res, next) {
-  if (ALLOWED_IPS.length === 0) return next();
+  const allowed = ALLOWED_IPS;
+  if (allowed.length === 0) return next();
 
   const clientIp = (req.ip || '').replace(/^::ffff:/, '');
-  const ok = ALLOWED_IPS.some((entry) => (entry.includes('/') ? ipInCidr(clientIp, entry) : entry === clientIp));
+  const ok = allowed.some((entry) => (entry.includes('/') ? ipInCidr(clientIp, entry) : entry === clientIp));
   if (!ok) return res.status(403).json({ error: 'Access denied from this network' });
   next();
 }

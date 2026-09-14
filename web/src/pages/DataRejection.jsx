@@ -1,16 +1,17 @@
-import { useState, useEffect, useMemo } from 'react';
-import { RefreshCw, X } from 'lucide-react';
-import RejectionTable from '../components/dashboard/RejectionTable.jsx';
-import Combobox from '../components/ui/Combobox.jsx';
-import Pagination from '../components/ui/Pagination.jsx';
-import PeriodPicker from '../components/maintenance/PeriodPicker.jsx';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { RefreshCw, X, Download } from 'lucide-react';
+import RejectionTable from '../components/RejectionTable.jsx';
+import Combobox from '../components/Combobox.jsx';
+import PeriodPicker from '../components/PeriodPicker.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { fetchMaster } from '../services/masterService.js';
-import { fetchRejectionEntries, updateRejectionEntry, deleteRejectionEntry } from '../services/rejectionService.js';
-import { usePaginatedList, PAGE_SIZE } from '../hooks/usePaginatedList.js';
+import { apiFetch, apiSend } from '../api.js';
 import { useToast } from '../contexts/ToastContext.jsx';
 import { useConfirm } from '../contexts/ConfirmContext.jsx';
 import { isReadOnlyUser } from '../roles.js';
+import { downloadXlsx } from '../exportXlsx.js';
+import { formatDateID } from '../dateFmt.js';
+
+const CLUSTERS = ['AD', 'BC', 'EF', 'FI'];
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
@@ -49,7 +50,7 @@ function EditRejectionModal({ row, master, onClose, onSaved }) {
   async function save() {
     setBusy(true);
     try {
-      await updateRejectionEntry({
+      await apiSend('/rejection-entry-update', 'POST', {
         id: row.id,
         tanggal: form.tanggal, waktu: form.waktu, part_name: form.partName,
         total_lmr: form.totalLmr,
@@ -110,44 +111,61 @@ export default function DataRejection() {
   const confirm = useConfirm();
   const [period, setPeriod]   = useState('today');
   const [refDate, setRefDate] = useState(todayStr());
+  const [clusterFilter, setClusterFilter] = useState('all');
   const [query, setQuery]     = useState('');
+  const [rows, setRows]       = useState([]);
   const [master, setMaster]   = useState({ partNames: [], kriteriaNg: [] });
+  const [loading, setLoading] = useState(false);
   const [editRow, setEditRow] = useState(null);
 
-  const {
-    rows, page, setPage, totalPages, total, loading, error, reload: load,
-  } = usePaginatedList(
-    fetchRejectionEntries,
-    (p, pageSize) => `period=${period}&date=${refDate}&page=${p}&pageSize=${pageSize}`,
-    [period, refDate],
-  );
+  const load = useCallback(() => {
+    setLoading(true);
+    apiFetch(`/rejection-entries?period=${period}&date=${refDate}`, [], logout).then((data) => {
+      setRows(data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [period, refDate, logout]);
 
+  useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    fetchMaster({ partNames: [], kriteriaNg: [] }, logout).then(setMaster);
+    apiFetch('/master', { partNames: [], kriteriaNg: [] }, logout).then(setMaster);
   }, [logout]);
 
-  // Filter/periode ganti -> balik ke halaman 1, biar tidak nyangkut di
-  // halaman yang mungkin sudah tidak ada isinya untuk filter yang baru.
-  useEffect(() => { setPage(1); }, [period, refDate]);
-
-  // Catatan: pencarian ini filter lokal, jadi hanya menyaring baris di
-  // halaman yang lagi tampil (lihat Pagination di bawah tabel) -- bukan
-  // pencarian ke semua data. Kalau butuh cari lintas halaman, ganti
-  // periode/tanggal supaya rentang datanya lebih sempit dulu.
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      r.partName.toLowerCase().includes(q) ||
-      (r.cluster || '').toLowerCase().includes(q) ||
-      (r.kriteriaNg || '').toLowerCase().includes(q),
-    );
-  }, [rows, query]);
+    return rows.filter((r) => {
+      if (clusterFilter !== 'all' && r.cluster !== clusterFilter) return false;
+      if (!q) return true;
+      return r.partName.toLowerCase().includes(q) ||
+        (r.cluster || '').toLowerCase().includes(q) ||
+        (r.kriteriaNg || '').toLowerCase().includes(q);
+    });
+  }, [rows, query, clusterFilter]);
+
+  // Download Excel (.xlsx asli lewat library xlsx/SheetJS) -- isinya data
+  // yang lagi kefilter di layar (Periode/Cluster/pencarian), sama pola
+  // dengan tombol Download Excel di Data Produksi.
+  function handleExport() {
+    const columns = [
+      { key: 'tanggal', label: 'Tanggal' },
+      { key: 'waktu', label: 'Waktu' },
+      { key: 'cluster', label: 'Cluster' },
+      { key: 'partName', label: 'Part Name' },
+      { key: 'totalOk', label: 'Total OK' },
+      { key: 'totalLmr', label: 'Total LMR' },
+      { key: 'totalProses', label: 'Total Proses' },
+      { key: 'rejectRatio', label: 'Reject Ratio (%)' },
+      { key: 'kriteriaNg', label: 'Kriteria NG' },
+      { key: 'keterangan', label: 'Keterangan' },
+    ];
+    const exportRows = filteredRows.map((r) => ({ ...r, tanggal: formatDateID(r.tanggal) }));
+    downloadXlsx(`data-rejection_${refDate}.xlsx`, 'Data Rejection', columns, exportRows);
+  }
 
   async function handleDelete(row) {
     if (!(await confirm(`Hapus data Rejection ${row.partName} (${row.tanggal})?`))) return;
     try {
-      await deleteRejectionEntry(row.id, logout);
+      await apiSend('/rejection-entry-delete', 'POST', { id: row.id }, logout);
       showToast('Data berhasil dihapus', 'green');
       load();
     } catch (e) { showToast(e.message, 'red'); }
@@ -165,6 +183,15 @@ export default function DataRejection() {
         <span className="group-box-title">Apply Filters</span>
         <div className="dash-filter-bar" style={{ flexWrap: 'wrap' }}>
           <PeriodPicker pill period={period} setPeriod={setPeriod} refDate={refDate} setRefDate={setRefDate} />
+          <select
+            value={clusterFilter}
+            onChange={(e) => setClusterFilter(e.target.value)}
+            className="pp-select"
+            style={{ height: 34 }}
+          >
+            <option value="all">Semua Cluster</option>
+            {CLUSTERS.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
           <input
             type="text"
             placeholder="Cari Part Name / Cluster / Kriteria NG…"
@@ -176,14 +203,18 @@ export default function DataRejection() {
           <button className="btn-icon" title="Refresh data" onClick={load}>
             <RefreshCw size={14} />
           </button>
+          <button className="btn" onClick={handleExport} disabled={filteredRows.length === 0} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Download size={14} /> Download Excel
+          </button>
+          <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>
+            {filteredRows.length.toLocaleString()} baris
+          </span>
         </div>
       </div>
 
       <div className="card" style={{ padding: 0 }}>
-        <RejectionTable rows={filteredRows} loading={loading} error={error} onRetry={load} onEdit={readOnly ? null : setEditRow} onDelete={readOnly ? null : handleDelete} />
+        <RejectionTable rows={filteredRows} loading={loading} onEdit={readOnly ? null : setEditRow} onDelete={readOnly ? null : handleDelete} />
       </div>
-
-      <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onPageChange={setPage} disabled={loading} />
 
       {editRow && (
         <EditRejectionModal row={editRow} master={master} onClose={() => setEditRow(null)} onSaved={load} />

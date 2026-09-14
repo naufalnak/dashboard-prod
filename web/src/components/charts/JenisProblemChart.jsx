@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-// Donut chart persentase Jenis Problem (4M + 1E + Setting & Tool),
+// Donut chart persentase Jenis Problem (4M + Setting & Tool),
 // diakumulasi dari kolom ProduksiHarian.jenis_problem dalam periode
 // terpilih. Gaya ring berlubang di tengah (sama seperti MiniRing/
 // GaugeCard), bukan pie solid -- tiap kategori digambar sebagai segmen
@@ -8,13 +8,19 @@ import { useState } from 'react';
 // (ClusterBarList.jsx: biru/amber/teal gelap/ungu) supaya dua chart yang
 // bersebelahan di Detail AR tidak kelihatan pakai warna yang sama --
 // tone cerah tapi tidak terlalu terang, bukan warna gelap.
+// "Environment" sudah dihapus dari pilihan input Jenis Problem, tapi
+// warnanya TETAP disimpan di sini -- data lama yang masih pakai nilai
+// itu tidak di-backfill, chart-nya harus tetap bisa mewarnai baris lama.
+// Palet navy/indigo/teal/biru -- mengikuti keluarga warna tema terang
+// baru (login/sidebar MTN-style, lihat index.css), gantikan warna cerah
+// generik sebelumnya supaya donut ini konsisten dengan tampilan MTN.
 const JENIS_COLORS = {
-  Machine: '#ef4444',
-  Material: '#84cc16',
-  Method: '#ec4899',
-  Man: '#06b6d4',
-  Environment: '#22c55e',
-  'Setting & Tool': '#6366f1',
+  Machine: 'var(--accent2)',
+  Material: 'var(--green)',
+  Method: 'var(--purple)',
+  Man: 'var(--blue)',
+  Environment: 'var(--yellow)',
+  'Setting & Tool': 'var(--accent)',
 };
 
 function polarToCartesian(cx, cy, r, angleDeg) {
@@ -26,10 +32,12 @@ function MiniDot({ label, pct, count, size, color, countLabel }) {
   const r = size / 2 - 2;
   const cx = size / 2, cy = size / 2;
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <circle cx={cx} cy={cy} r={r} fill={color} />
-      </svg>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+      <div style={{ width: size, maxWidth: size, aspectRatio: '1', flexShrink: 0 }}>
+        <svg width="100%" height="100%" viewBox={`0 0 ${size} ${size}`}>
+          <circle cx={cx} cy={cy} r={r} fill={color} />
+        </svg>
+      </div>
       <div>
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>{label}</div>
         <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{pct}%</div>
@@ -65,9 +73,16 @@ export default function JenisProblemChart({ data, mainSize = 200, miniSize = 62,
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 28 }}>
-      <div className="jp-chart-wrap" style={{ position: 'relative', flexShrink: 0 }}>
-        <svg width={mainSize} height={mainSize} viewBox={`0 0 ${mainSize} ${mainSize}`}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap', minWidth: 0 }}>
+      {/* jp-chart-wrap dulu width/height SVG fixed px = mainSize -- di
+          kartu yang lebih sempit dari itu (layar kecil, zoom browser
+          tinggi), SVG-nya overflow lalu terpotong oleh .card{overflow:
+          hidden}. width:mainSize + maxWidth:100% bikin mainSize cuma jadi
+          batas atas, ring-nya ikut menyusut kalau ruangnya sempit --
+          minWidth jadi batas bawah supaya tidak ikut menyusut tanpa batas
+          kalau kartu induknya jadi sangat sempit di zoom ekstrem. */}
+      <div className="jp-chart-wrap" style={{ position: 'relative', flexShrink: 0, width: mainSize, maxWidth: '100%', minWidth: Math.max(90, mainSize * 0.5), aspectRatio: '1' }}>
+        <svg width="100%" height="100%" viewBox={`0 0 ${mainSize} ${mainSize}`}>
           <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(150,155,165,.28)" strokeWidth={strokeW} />
           {slices.map((s) => (
             <circle
@@ -96,6 +111,15 @@ export default function JenisProblemChart({ data, mainSize = 200, miniSize = 62,
             );
           })}
         </svg>
+        {/* Label total kategori di tengah lubang donut -- gaya MTN
+            ("6 kategori" dkk di donut Distribusi Downtime mereka). */}
+        <div style={{
+          position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', pointerEvents: 'none',
+        }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)', lineHeight: 1 }}>{data.length}</div>
+          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>kategori</div>
+        </div>
         {hover && (
           <div style={{
             position: 'absolute', left: hover.x + 12, top: hover.y - 8, transform: 'translateY(-100%)',
@@ -106,7 +130,7 @@ export default function JenisProblemChart({ data, mainSize = 200, miniSize = 62,
           </div>
         )}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, justifyContent: 'space-between', minWidth: 0 }}>
         {slices.map((s) => (
           <MiniDot key={s.jenis} label={s.jenis} pct={s.pct} count={s.count} size={miniSize} color={colors[s.jenis] || 'var(--accent)'} countLabel={countLabel} />
         ))}

@@ -1,50 +1,35 @@
-// ── Validasi input terpusat ──────────────────────────────────────────
-// Dulu tiap route handler nulis ulang pola yang sama:
-//   const id = Number(req.body.id);
-//   if (!id) return res.status(400).json({ error: 'Invalid id' });
-// atau
-//   if (!tanggal || !part_name) return res.status(400).json({ error: '...' });
-// tersebar di ~90 endpoint. 3 helper di bawah ini menggantikan pola itu
-// jadi middleware yang dipasang di router.post(path, validateX(...), handler)
-// -- perilakunya SENGAJA dibuat identik dengan pola lama (status 400,
-// bentuk pesan error yang sama) supaya tidak ada perubahan response yang
-// dilihat frontend, cuma lokasi kodenya yang dirapikan.
+// Validasi input terpusat -- sebelumnya tiap route nulis ulang pola
+// `if (!field) return res.status(400).json({ error: '...' })` sendiri-
+// sendiri, dengan pesan yang formatnya kadang beda-beda antar endpoint.
 //
-// CATATAN CAKUPAN: middleware ini sudah dipasang di rejection/overtime/
-// rework/problemLog/produksi/auth.routes.js. masterData.routes.js (~30
-// endpoint CRUD) BELUM disapu satu-satu ke validate() ini -- pola
-// `if (!id) return res.status(400)...`-nya konsisten dan aman dipakai apa
-// adanya, tapi migrasinya sendiri effort-nya signifikan (banyak field
-// custom per Master), jadi belum termasuk di batch ini.
-
-// Cek field wajib ada isinya di req.body. `fields`: array nama field, ATAU
-// array of [fieldName, bodyKey] kalau nama di response error beda dari key
-// di body (jarang dipakai, disediakan buat jaga-jaga).
-function validateBody(fields, message) {
+// SENGAJA OPSIONAL -- endpoint lama TIDAK wajib diganti ke ini sekaligus
+// (77 endpoint, riskan diubah serentak tanpa test coverage penuh). Pakai
+// di endpoint baru, atau saat sedang menyentuh endpoint lama untuk alasan
+// lain, supaya polanya makin konsisten secara bertahap.
+//
+// Usage:
+//   router.post('/foo', requireAuth, requireFields(['name', 'cluster']), async (req, res) => { ... })
+//   router.post('/foo-update', requireAuth, requireId(), async (req, res) => {
+//     const id = req.validatedId; // sudah dipastikan angka & truthy
+//   })
+function requireFields(fields, source = 'body') {
   return (req, res, next) => {
-    const missing = fields.filter((f) => {
-      const val = req.body[f];
-      return val === undefined || val === null || val === '';
-    });
+    const data = req[source] || {};
+    const missing = fields.filter((f) => data[f] === undefined || data[f] === null || data[f] === '');
     if (missing.length > 0) {
-      return res.status(400).json({ error: message || `${missing.join(', ')} wajib diisi` });
+      return res.status(400).json({ error: `${missing.join(', ')} wajib diisi` });
     }
     next();
   };
 }
 
-// Pola paling sering dipakai: `id` (atau nama lain) di req.body harus ada
-// dan berupa angka > 0 (mis. hasil Number("") atau Number("abc") = NaN,
-// keduanya falsy, ditolak sama seperti pola lama). Menormalkan
-// req.body[paramName] jadi Number supaya handler di belakangnya tidak
-// perlu Number(...) ulang.
-function validateId(paramName = 'id') {
+function requireId(source = 'body') {
   return (req, res, next) => {
-    const id = Number(req.body[paramName]);
+    const id = Number((req[source] || {}).id);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
-    req.body[paramName] = id;
+    req.validatedId = id;
     next();
   };
 }
 
-module.exports = { validateBody, validateId };
+module.exports = { requireFields, requireId };

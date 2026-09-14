@@ -20,6 +20,7 @@ export const NAV_ITEMS = [
   { page: 'problemlog',    label: 'Problem & Root Cause' },
   { page: 'downtimeproduksi', label: 'Downtime Produksi' },
   { page: 'masterdata',    label: 'Master Data' },
+  { page: 'datavalidasi',  label: 'Validasi Data' },
   { href: '/lhp',          label: 'Resume Control Harian Produksi' },
 ];
 

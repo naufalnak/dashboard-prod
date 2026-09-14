@@ -2,7 +2,7 @@ import { BarChart3, Zap, FolderUp, Download, FileText } from 'lucide-react';
 import { useUI } from '../contexts/UIContext.jsx';
 import { useToast } from '../contexts/ToastContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { exportMachinesCsv } from '../services/masterService.js';
+import { apiDownload } from '../api.js';
 
 const REPORT_NAMES = { availability: 'Rangkuman Availability', breakdown: 'Analisis Breakdown' };
 
@@ -19,7 +19,7 @@ export default function Reports() {
 
   async function doExport() {
     try {
-      await exportMachinesCsv(`mesin-history-${new Date().toISOString().slice(0, 10)}.csv`, logout);
+      await apiDownload('/export-machines', `mesin-history-${new Date().toISOString().slice(0, 10)}.csv`, logout);
       showToast('Diekspor ke CSV', 'green');
     } catch (e) {
       showToast(e.message, 'red');

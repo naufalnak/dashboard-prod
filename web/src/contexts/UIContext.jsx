@@ -36,6 +36,7 @@ export function UIProvider({ children }) {
   const [maintFilter, setMaintFilter] = useState('');
   const [masterDataTab, setMasterDataTab] = useState('');
   const [dataProduksiQuery, setDataProduksiQuery] = useState('');
+  const [partProsesQuery, setPartProsesQuery] = useState('');
 
   const navigate = useCallback((p) => {
     setPage(sanitizePage(p));
@@ -70,6 +71,20 @@ export function UIProvider({ children }) {
   const navigateToDataProduksi = useCallback((q = '') => {
     setDataProduksiQuery(q);
     setPage(sanitizePage('dataproduksi'));
+    setDetailMachine(null);
+    setDrawerOpen(false);
+  }, [sanitizePage]);
+
+  // Buka Master Data langsung ke tab Part Name & Proses dengan kotak
+  // pencarian sudah terisi -- dipakai dari halaman Validasi Data (panel
+  // "Mesin/Line Belum Sesuai Tabel Machine" & "Part Name Belum Punya Proses
+  // Akhir/Finish") supaya admin langsung lompat ke baris tabelnya, sama
+  // pola dengan navigateToDataProduksi. PartProsesTab.jsx yang baca state
+  // ini sekali saat tab dibuka, lalu reset ke '' lewat setPartProsesQuery.
+  const navigateToPartProses = useCallback((q = '') => {
+    setPartProsesQuery(q);
+    setMasterDataTab('partProses');
+    setPage(sanitizePage('masterdata'));
     setDetailMachine(null);
     setDrawerOpen(false);
   }, [sanitizePage]);
@@ -117,6 +132,7 @@ export function UIProvider({ children }) {
       maintFilter, setMaintFilter, navigateToMaintenance,
       masterDataTab, setMasterDataTab, navigateToMasterData,
       dataProduksiQuery, setDataProduksiQuery, navigateToDataProduksi,
+      partProsesQuery, setPartProsesQuery, navigateToPartProses,
     }}>
       {children}
     </UIContext.Provider>

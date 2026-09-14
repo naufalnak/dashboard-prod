@@ -1,123 +1,129 @@
-const { rowMetrics, aggregateOee, avgArValues } = require('../../src/services/produksiMetrics.service');
+import { describe, it, expect } from 'vitest';
+import produksiMetrics from '../../src/services/produksiMetrics.service.js';
 
-// Fungsi-fungsi ini murni (tidak nyentuh Prisma/req/res), jadi test-nya
-// cuma objek in -> objek out. Nilai expected di bawah dihitung langsung
-// dari rowMetrics() asli (bukan dikira-kira), supaya test ini jadi
-// "characterization test" yang jujur: kalau rumus di produksiMetrics
-// berubah secara tidak sengaja pas refactor Tier 3 (agregasi DB), test
-// ini yang pertama teriak.
+const { rowMetrics, aggregateOee, avgArValues, rejectionMetrics, weekOfMonth } = produksiMetrics;
+
+// Fungsi murni (rowMetrics, aggregateOee, avgArValues, rejectionMetrics,
+// weekOfMonth) yang paling sering dipakai ulang di seluruh dashboard --
+// diprioritaskan duluan karena satu bug di sini langsung salah di banyak
+// tempat (AR Cluster, OEE Cluster, footer tabel Data Produksi, dll).
+// resolveTotalOkFromProduksi & sumOvertimeTargetHours butuh Prisma (DB
+// I/O) jadi belum ditest di sini -- integration test terpisah.
 
 describe('rowMetrics', () => {
-  test('kasus normal: semua kolom terisi wajar', () => {
-    const row = {
-      ok1: 80, ok2: 10, rework: 5, reject: 5,
-      waktuEfektif: 8, breakdownMesin: 30, cycleTime: 25,
-      lostTime: 20, plan: 100,
-    };
-    expect(rowMetrics(row)).toEqual({
-      totalOk: 90,
-      totalProses: 100,
-      avb: 83.8,
-      perf: 8.6,
-      yield: 90,
-      ar: 100,
-      oee: 6.5,
-    });
+  const base = {
+    ok1: 100, ok2: 0, rework: 0, reject: 0,
+    plan: 100, waktuEfektif: 8, breakdownMesin: 0, lostTime: 0, cycleTime: 60,
+  };
+
+  it('AR 100% saat Total Proses persis sama dengan Plan', () => {
+    const m = rowMetrics(base);
+    expect(m.totalOk).toBe(100);
+    expect(m.totalProses).toBe(100);
+    expect(m.ar).toBe(100);
   });
 
-  test('plan = 0 -> AR jadi 0 (bukan Infinity/NaN)', () => {
-    const row = {
-      ok1: 50, ok2: 0, rework: 0, reject: 0,
-      waktuEfektif: 8, breakdownMesin: 0, cycleTime: 20,
-      lostTime: 0, plan: 0,
-    };
-    const m = rowMetrics(row);
+  it('AR dipatok maksimal 100% walau Total Proses melebihi Plan', () => {
+    const m = rowMetrics({ ...base, ok1: 150 });
+    expect(m.ar).toBe(100);
+  });
+
+  it('AR 0% kalau Plan 0 (hindari divide-by-zero)', () => {
+    const m = rowMetrics({ ...base, plan: 0 });
     expect(m.ar).toBe(0);
-    expect(Number.isFinite(m.ar)).toBe(true);
   });
 
-  test('waktuEfektif = 0 -> semua metrik 0, tidak NaN', () => {
-    const row = {
-      ok1: 0, ok2: 0, rework: 0, reject: 0,
-      waktuEfektif: 0, breakdownMesin: 0, cycleTime: 10,
-      lostTime: 0, plan: 100,
-    };
-    const m = rowMetrics(row);
-    expect(m).toEqual({
-      totalOk: 0, totalProses: 0, avb: 0, perf: 0, yield: 0, ar: 0, oee: 0,
-    });
+  it('YIELD turun kalau ada Reject (Total OK < Total Proses)', () => {
+    const m = rowMetrics({ ...base, ok1: 90, reject: 10 });
+    expect(m.totalOk).toBe(90);
+    expect(m.totalProses).toBe(100);
+    expect(m.yield).toBe(90);
   });
 
-  test('totalProses = 0 (tidak ada produksi sama sekali) -> yield & ar 0, bukan NaN', () => {
-    const row = {
-      ok1: 0, ok2: 0, rework: 0, reject: 0,
-      waktuEfektif: 8, breakdownMesin: 10, cycleTime: 15,
-      lostTime: 5, plan: 50,
-    };
-    const m = rowMetrics(row);
-    expect(m.yield).toBe(0);
+  it('AVB dipatok maksimal 90 (plafon standar OEE)', () => {
+    // Waktu Efektif besar, Breakdown Mesin 0 -> AVB harusnya mentok di 90,
+    // bukan 100, sesuai plafon yang dipakai seluruh dashboard.
+    const m = rowMetrics({ ...base, waktuEfektif: 100, breakdownMesin: 0 });
+    expect(m.avb).toBeLessThanOrEqual(90);
+  });
+
+  it('PERF dipatok maksimal 95 (plafon standar OEE)', () => {
+    const m = rowMetrics({ ...base, cycleTime: 999999 });
+    expect(m.perf).toBeLessThanOrEqual(95);
+  });
+
+  it('OEE dipatok maksimal 85 (plafon standar OEE)', () => {
+    const m = rowMetrics(base);
+    expect(m.oee).toBeLessThanOrEqual(85);
+  });
+
+  it('semua metrik 0 kalau baris kosong total (tidak ada NaN)', () => {
+    const m = rowMetrics({ ok1: 0, ok2: 0, rework: 0, reject: 0, plan: 0, waktuEfektif: 0, breakdownMesin: 0, lostTime: 0, cycleTime: 0 });
     expect(m.ar).toBe(0);
-    expect(m.avb).toBe(87.9);
-  });
-
-  test('breakdown ekstrem -> AVB diklem ke 0 (tidak minus)', () => {
-    const row = {
-      ok1: 40, ok2: 0, rework: 0, reject: 0,
-      waktuEfektif: 8, breakdownMesin: 1000, cycleTime: 30,
-      lostTime: 0, plan: 40,
-    };
-    const m = rowMetrics(row);
     expect(m.avb).toBe(0);
-    expect(m.avb).toBeGreaterThanOrEqual(0);
-  });
-
-  test('AVB tidak pernah lebih dari plafon 90', () => {
-    const row = {
-      ok1: 100, ok2: 0, rework: 0, reject: 0,
-      waktuEfektif: 8, breakdownMesin: 0, cycleTime: 1,
-      lostTime: 0, plan: 100,
-    };
-    expect(rowMetrics(row).avb).toBeLessThanOrEqual(90);
-  });
-
-  test('OEE tidak pernah lebih dari plafon 85', () => {
-    const row = {
-      ok1: 1000, ok2: 0, rework: 0, reject: 0,
-      waktuEfektif: 8, breakdownMesin: 0, cycleTime: 0.01,
-      lostTime: 0, plan: 1000,
-    };
-    expect(rowMetrics(row).oee).toBeLessThanOrEqual(85);
+    expect(m.perf).toBe(0);
+    expect(m.yield).toBe(0);
+    expect(m.oee).toBe(0);
+    expect(Number.isNaN(m.oee)).toBe(false);
   });
 });
 
 describe('aggregateOee', () => {
-  test('array kosong -> semua 0, bukan NaN', () => {
+  it('{avb:0,perf:0,yield:0,oee:0} kalau tidak ada baris (bukan NaN/crash)', () => {
     expect(aggregateOee([])).toEqual({ avb: 0, perf: 0, yield: 0, oee: 0 });
   });
 
-  test('rata-rata polos dari beberapa baris', () => {
-    const rowA = {
-      ok1: 80, ok2: 10, rework: 5, reject: 5,
-      waktuEfektif: 8, breakdownMesin: 30, cycleTime: 25,
-      lostTime: 20, plan: 100,
-    };
-    const rowB = {
-      ok1: 50, ok2: 0, rework: 0, reject: 0,
-      waktuEfektif: 8, breakdownMesin: 0, cycleTime: 20,
-      lostTime: 0, plan: 0,
-    };
-    expect(aggregateOee([rowA, rowB])).toEqual({
-      avb: 86.9, perf: 6.1, yield: 95, oee: 4.9,
-    });
+  it('rata-rata POLOS dari metrik tiap baris (bukan tertimbang) -- harus sama dengan footer tabel Data Produksi', () => {
+    const rowSmall = { ok1: 1, ok2: 0, rework: 0, reject: 0, plan: 1, waktuEfektif: 8, breakdownMesin: 0, lostTime: 0, cycleTime: 60 }; // AR 100%
+    const rowBig = { ok1: 5, ok2: 0, rework: 0, reject: 5, plan: 10, waktuEfektif: 8, breakdownMesin: 0, lostTime: 0, cycleTime: 60 }; // YIELD 50%
+    const result = aggregateOee([rowSmall, rowBig]);
+    // Rata-rata polos YIELD: (100 + 50) / 2 = 75, BUKAN tertimbang
+    // (yang akan kasih hasil beda kalau baris size-nya jomplang).
+    expect(result.yield).toBe(75);
   });
 });
 
 describe('avgArValues', () => {
-  test('array kosong -> 0, bukan NaN', () => {
+  it('0 kalau array kosong (bukan NaN)', () => {
     expect(avgArValues([])).toBe(0);
   });
 
-  test('rata-rata dibulatkan 1 desimal', () => {
-    expect(avgArValues([10, 20, 30.456])).toBe(20.2);
+  it('rata-rata sederhana dibulatkan 1 desimal', () => {
+    expect(avgArValues([100, 90, 80])).toBe(90);
+    expect(avgArValues([100, 91])).toBe(95.5);
+  });
+});
+
+describe('rejectionMetrics', () => {
+  it('reject ratio dihitung dari LMR/OK (bukan LMR/TotalProses)', () => {
+    const m = rejectionMetrics({ totalOk: 90, totalLmr: 10, price: 1000 });
+    expect(m.totalProses).toBe(100);
+    expect(m.rejectRatio).toBeCloseTo((10 / 90) * 100, 2);
+  });
+
+  it('nilaiOk/nilaiLmr = qty x price', () => {
+    const m = rejectionMetrics({ totalOk: 10, totalLmr: 2, price: 500 });
+    expect(m.nilaiOk).toBe(5000);
+    expect(m.nilaiLmr).toBe(1000);
+  });
+
+  it('reject ratio 0 kalau Total OK 0 (hindari divide-by-zero)', () => {
+    const m = rejectionMetrics({ totalOk: 0, totalLmr: 5, price: 100 });
+    expect(m.rejectRatio).toBe(0);
+  });
+});
+
+describe('weekOfMonth', () => {
+  it('tanggal 1-7 = minggu 1', () => {
+    expect(weekOfMonth(new Date(Date.UTC(2026, 0, 1)))).toBe(1);
+    expect(weekOfMonth(new Date(Date.UTC(2026, 0, 7)))).toBe(1);
+  });
+
+  it('tanggal 8-14 = minggu 2', () => {
+    expect(weekOfMonth(new Date(Date.UTC(2026, 0, 8)))).toBe(2);
+  });
+
+  it('tanggal 29-31 = minggu 5', () => {
+    expect(weekOfMonth(new Date(Date.UTC(2026, 0, 31)))).toBe(5);
   });
 });

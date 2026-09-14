@@ -1,42 +1,31 @@
-// Rentang maksimal (tahun) buat period 'all'/'year' -- dulu hardcode
-// 2000-2099 (praktis unbounded), yang bikin query full-scan seluruh
-// riwayat ProduksiHarian/RejectionEntry/dst dan makin lambat seiring data
-// historis menumpuk. Dibatasi N tahun ke belakang dari tanggal referensi
-// (bukan dari hari ini secara mutlak, supaya tetap konsisten kalau ?date=
-// dikirim) sebagai pengaman sementara -- kalau nanti dibutuhkan "semua
-// data" yang benar-benar tanpa batas, sebaiknya lewat mekanisme agregat
-// pre-computed (mis. rollup per bulan), bukan query mentah di rentang
-// selebar ini.
-const MAX_RANGE_YEARS = 2;
-
 // Calendar-aligned period range, anchored to an optional reference date
 // (defaults to now). Aligned with the bucketing used by /downtime-by-day
 // and /mtbf-mttr-trend so every endpoint agrees on what "this week"/
 // "this month" means.
 function getPeriodRange(period, refDateStr, rangeStartStr, rangeEndStr) {
-  const ref = refDateStr ? new Date(refDateStr) : new Date();
-
   if (period === 'all') {
-    const start = new Date(ref.getFullYear() - MAX_RANGE_YEARS, ref.getMonth(), ref.getDate());
-    const end = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate(), 23, 59, 59, 999);
-    return { start, end };
+    return { start: new Date(2000, 0, 1), end: new Date(2040, 11, 31, 23, 59, 59, 999) };
   }
 
   if (period === 'range' && rangeStartStr && rangeEndStr) {
     const s = new Date(rangeStartStr); s.setHours(0, 0, 0, 0);
     const e = new Date(rangeEndStr); e.setHours(23, 59, 59, 999);
-    // Rentang custom dari user tetap dipatok ke MAX_RANGE_YEARS -- supaya
-    // tidak dipakai buat "menyelundupkan" query unbounded lewat
-    // ?period=range&start=2000-01-01&end=2099-12-31.
-    const minAllowedStart = new Date(e.getFullYear() - MAX_RANGE_YEARS, e.getMonth(), e.getDate());
-    return { start: s < minAllowedStart ? minAllowedStart : s, end: e };
+    return { start: s, end: e };
   }
 
+  const ref = refDateStr ? new Date(refDateStr) : new Date();
   let start, end;
 
   if (period === 'year') {
-    start = new Date(ref.getFullYear() - MAX_RANGE_YEARS, ref.getMonth(), ref.getDate());
-    end   = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate(), 23, 59, 59, 999);
+    // Sama pola dengan "Bulanan" (lihat catatan di atas) -- dulu sengaja
+    // (atau tersisa dari desain lama) diset rentang lebar 2000-2099,
+    // fungsinya jadi sama persis dengan period="all" walau tahun yang
+    // dipilih di YearPicker (mis. 2026) diabaikan sama sekali. Sekarang
+    // "Tahunan" benar-benar memfilter ke tahun spesifik yang dipilih (1
+    // Jan - 31 Des tahun itu saja), konsisten dengan "Harian" dan
+    // "Bulanan" yang sudah direvisi ke prinsip yang sama.
+    start = new Date(ref.getFullYear(), 0, 1);
+    end   = new Date(ref.getFullYear(), 11, 31, 23, 59, 59, 999);
   } else if (period === 'week') {
     const dayOfWeek = ref.getDay(); // 0 = Sunday .. 6 = Saturday
     const mondayOffset = (dayOfWeek + 6) % 7;
@@ -47,10 +36,16 @@ function getPeriodRange(period, refDateStr, rangeStartStr, rangeEndStr) {
     end.setDate(end.getDate() + 6);
     end.setHours(23, 59, 59, 999);
   } else if (period === 'month') {
-    // "Bulanan" tetap satu tahun penuh (per bulan) -- tidak diminta berubah,
-    // cuma "Harian" yang direvisi supaya benar-benar per tanggal spesifik.
-    start = new Date(ref.getFullYear(), 0, 1);
-    end = new Date(ref.getFullYear(), 11, 31, 23, 59, 59, 999);
+    // "Bulanan" dulu sengaja diset satu TAHUN penuh (lihat riwayat commit
+    // acc2d68 "Filter Harian: kembalikan ke tanggal spesifik") -- waktu itu
+    // cuma "Harian" yang direvisi ke tanggal spesifik, "Bulanan" sengaja
+    // tidak disentuh karena bukan scope perbaikan itu. Sekarang direvisi
+    // juga jadi bulan spesifik yang dipilih saja (sama alasan dengan
+    // "Harian" sebelumnya): tabel data (Data Rejection dkk) menampilkan
+    // SEMUA baris satu tahun penuh padahal PeriodPicker-nya bilang "Bulanan
+    // Agustus", bukan cuma bulan itu.
+    start = new Date(ref.getFullYear(), ref.getMonth(), 1);
+    end = new Date(ref.getFullYear(), ref.getMonth() + 1, 0, 23, 59, 59, 999);
   } else {
     // default ("today" / "Harian"): tanggal spesifik yang dipilih saja --
     // ganti tanggal di PeriodPicker harus benar-benar mengubah data yang

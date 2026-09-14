@@ -1,11 +1,18 @@
+// Business logic & query Prisma untuk domain Data Pengerjaan Part Rework
+// (PartReworkEntry) -- dipindah dari routes/rework.routes.js.
 const prisma = require('../lib/prisma');
 const { getPeriodRange } = require('../lib/period');
+const { toDateOnly, upper } = require('../utils/formatters');
 
-// Cocokkan nama Grup Head (diketik di form) ke MasterGroupHead -- beda
-// dari resolveGroupHeadByUsername (di produksi.service, cocokkan USERNAME
-// login ke kata pertama nama), ini cocokkan NAMA Grup Head yang dipilih
-// di form ke baris master-nya buat dapat id + Cluster-nya, sama pola
-// dengan resolveManPowerChain di overtime.service.
+function httpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+// Cocokkan NAMA Grup Head yang dipilih di form ke baris master-nya buat
+// dapat id + Cluster-nya -- beda dari resolveGroupHeadByUsername di
+// produksi.service.js (yang cocokkan USERNAME login ke kata pertama nama).
 async function resolveGroupHead(groupHeadName) {
   if (!groupHeadName) return { groupHeadId: null, cluster: null };
   const gh = await prisma.masterGroupHead.findFirst({ where: { name: { equals: groupHeadName, mode: 'insensitive' } } });
@@ -26,9 +33,9 @@ function generateNoLotRework(tanggalRepair) {
 function serializePartRework(r) {
   return {
     id: r.id,
-    tanggalDitemukan: r.tanggalDitemukan.toISOString().slice(0, 10),
+    tanggalDitemukan: toDateOnly(r.tanggalDitemukan),
     noLotOriginal: r.noLotOriginal,
-    tanggalRepair: r.tanggalRepair.toISOString().slice(0, 10),
+    tanggalRepair: toDateOnly(r.tanggalRepair),
     noLotRework: r.noLotRework,
     partName: r.partName,
     kriteriaRework: r.kriteriaRework,
@@ -41,31 +48,34 @@ function serializePartRework(r) {
     totalOk: r.totalOk,
     totalReject: r.totalReject,
     metodeCheck: r.metodeCheck,
-    tanggalCheck: r.tanggalCheck ? r.tanggalCheck.toISOString().slice(0, 10) : null,
+    tanggalCheck: r.tanggalCheck ? toDateOnly(r.tanggalCheck) : null,
     picCheck: r.picCheck,
   };
 }
 
-// Submit satu baris Data Pengerjaan Part Rework, mirip pola
-// overtime.service & rejection.service. Part Name & Mesin di-resolve
-// (soft -- tetap diterima kalau belum cocok Master Data/Tabel Machine,
-// beda dari validasi WAJIB di Master Data admin /master-proses, supaya
-// operator lapangan tidak terblokir) sama pola dengan endpoint publik
-// lain. Grup Head WAJIB cocok Master Data karena itu satu-satunya sumber
-// Cluster untuk baris ini.
+// Public — submit satu baris Data Pengerjaan Part Rework dari /lhp (tab
+// "Rework", tanpa login), mirip pola /overtime-entry & /rejection-entry.
+// Part Name & Mesin di-resolve (soft -- tetap diterima kalau belum cocok
+// Master Data/Tabel Machine, beda dari validasi WAJIB di Master Data admin
+// /master-proses, supaya operator lapangan tidak terblokir). Grup Head
+// WAJIB cocok Master Data karena itu satu-satunya sumber Cluster untuk
+// baris ini.
 async function createPartRework(body) {
   const {
     tanggal_ditemukan, no_lot_original, tanggal_repair, part_name,
     kriteria_rework, metode_rework, mesin, pic_rework, grup_head,
     total_rework, total_ok, total_reject, metode_check, tanggal_check, pic_check,
   } = body;
+  if (!tanggal_ditemukan || !tanggal_repair || !part_name || !grup_head) {
+    throw httpError(400, 'tanggal_ditemukan, tanggal_repair, part_name, dan grup_head wajib diisi');
+  }
 
   const [partNameMaster, machineMaster, { groupHeadId, cluster }] = await Promise.all([
     prisma.masterPartName.findFirst({ where: { partName: { equals: part_name, mode: 'insensitive' } } }),
     mesin ? prisma.machine.findFirst({ where: { machine: { equals: mesin, mode: 'insensitive' } } }) : null,
     resolveGroupHead(grup_head),
   ]);
-  if (!groupHeadId) return { status: 'group_head_not_found' };
+  if (!groupHeadId) throw httpError(400, `Grup Head "${grup_head}" tidak ditemukan di Master Data`);
 
   const record = await prisma.partReworkEntry.create({
     data: {
@@ -73,7 +83,7 @@ async function createPartRework(body) {
       noLotOriginal: no_lot_original || null,
       tanggalRepair: new Date(tanggal_repair),
       noLotRework: generateNoLotRework(tanggal_repair),
-      partName: partNameMaster?.partName || part_name,
+      partName: upper(partNameMaster?.partName || part_name),
       partNameId: partNameMaster?.id || null,
       kriteriaRework: kriteria_rework || null,
       metodeRework: metode_rework || null,
@@ -91,26 +101,18 @@ async function createPartRework(body) {
       picCheck: pic_check || null,
     },
   });
-  return { status: 'ok', record: serializePartRework(record) };
+  return serializePartRework(record);
 }
 
-// Daftar Data Pengerjaan Part Rework untuk menu Data Rework, difilter
-// periode sama pola dengan overtime.service, dipaging.
-async function listPartReworkEntries({ period, date, start: qsStart, end: qsEnd, page, pageSize, skip, take }) {
-  const { start, end } = getPeriodRange(period, date, qsStart, qsEnd);
-  const where = { tanggalRepair: { gte: start, lte: end } };
-  const [total, rows] = await Promise.all([
-    prisma.partReworkEntry.count({ where }),
-    prisma.partReworkEntry.findMany({
-      where,
-      orderBy: [{ tanggalRepair: 'desc' }, { id: 'desc' }],
-      skip, take,
-    }),
-  ]);
-  return {
-    rows: rows.map(serializePartRework),
-    page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)),
-  };
+// Login-gated — daftar semua Data Pengerjaan Part Rework untuk menu Data
+// Rework, difilter periode sama pola dengan overtime.service.js.
+async function listPartRework(query) {
+  const { start, end } = getPeriodRange(query.period, query.date, query.start, query.end);
+  const rows = await prisma.partReworkEntry.findMany({
+    where: { tanggalRepair: { gte: start, lte: end } },
+    orderBy: [{ tanggalRepair: 'desc' }, { id: 'desc' }],
+  });
+  return rows.map(serializePartRework);
 }
 
 async function updatePartRework(id, body) {
@@ -124,14 +126,14 @@ async function updatePartRework(id, body) {
   if (tanggal_ditemukan !== undefined) data.tanggalDitemukan = new Date(tanggal_ditemukan);
   if (no_lot_original !== undefined) data.noLotOriginal = no_lot_original || null;
   // No Lot Rework ikut di-regenerate kalau Tanggal Repair diedit -- tetap
-  // otomatis, tidak pernah diketik manual (lihat generateNoLotRework).
+  // otomatis, tidak pernah diketik manual.
   if (tanggal_repair !== undefined) {
     data.tanggalRepair = new Date(tanggal_repair);
     data.noLotRework = generateNoLotRework(tanggal_repair);
   }
   if (part_name !== undefined) {
     const partNameMaster = await prisma.masterPartName.findFirst({ where: { partName: { equals: part_name, mode: 'insensitive' } } });
-    data.partName = partNameMaster?.partName || part_name;
+    data.partName = upper(partNameMaster?.partName || part_name);
     data.partNameId = partNameMaster?.id || null;
   }
   if (kriteria_rework !== undefined) data.kriteriaRework = kriteria_rework || null;
@@ -144,7 +146,7 @@ async function updatePartRework(id, body) {
   if (pic_rework !== undefined) data.picRework = pic_rework || null;
   if (grup_head !== undefined) {
     const { groupHeadId, cluster } = await resolveGroupHead(grup_head);
-    if (!groupHeadId) return { status: 'group_head_not_found' };
+    if (!groupHeadId) throw httpError(400, `Grup Head "${grup_head}" tidak ditemukan di Master Data`);
     data.grupHead = grup_head;
     data.grupHeadId = groupHeadId;
     data.cluster = cluster;
@@ -157,7 +159,7 @@ async function updatePartRework(id, body) {
   if (pic_check !== undefined) data.picCheck = pic_check || null;
 
   const record = await prisma.partReworkEntry.update({ where: { id }, data });
-  return { status: 'ok', record: serializePartRework(record) };
+  return serializePartRework(record);
 }
 
 async function deletePartRework(id) {
@@ -166,7 +168,7 @@ async function deletePartRework(id) {
 
 module.exports = {
   createPartRework,
-  listPartReworkEntries,
+  listPartRework,
   updatePartRework,
   deletePartRework,
 };

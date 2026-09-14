@@ -15,7 +15,7 @@ const PRIVILEGED_USERNAMES = ['123', 'pradana', 'sugeng', 'djk'];
 // tidak menampilkan tombol yang toh akan ditolak server.
 const READ_ONLY_USERNAMES = ['aris', 'supri', 'fido'];
 
-export const RESTRICTED_PAGES = ['datarejection', 'masterdata'];
+export const RESTRICTED_PAGES = ['datarejection', 'masterdata', 'datavalidasi'];
 
 // Halaman "Semua Mesin" (Machines.jsx) dibatasi ke akun-akun ini secara
 // spesifik -- BUKAN sama dengan PRIVILEGED_USERNAMES (mis. akun "123" ada

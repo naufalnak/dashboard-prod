@@ -14,6 +14,11 @@
      look, unchanged. Only :root[data-theme="light"] below overrides them,
      so dark mode never has to be touched again when light mode changes. */
   --sidebar-bg:var(--s1);
+  --sidebar-text:var(--muted);
+  --sidebar-text-hover:var(--text);
+  --sidebar-active-bg:var(--s2);
+  --sidebar-active-text:var(--accent);
+  --sidebar-border:var(--border);
   --card-border:var(--border);
   --card-shadow:none;
   --card-shadow-hover:none;
@@ -21,18 +26,33 @@
   --input-border:var(--border);
   --btn-hover-bg:var(--s2);
 }
+/* Palet tema terang di-refresh meniru tampilan login MTN yang baru
+   (202.10.48.79) -- krem/putih hangat + aksen navy/indigo, gantikan
+   putih/abu-teal netral sebelumnya. Cuma tema TERANG yang diubah --
+   tema gelap dibiarkan (referensi MTN yang ada baru layar login, belum
+   ada versi gelapnya, jadi tidak ada dasar buat mengubah tema gelap).
+   Karena app ini sudah pakai token (bukan hardcode warna per komponen),
+   perubahan di sini otomatis menjalar ke semua halaman dashboard admin
+   yang lagi di tema terang -- KECUALI /lhp (RMOPublic), yang dari awal
+   sengaja berdiri sendiri dengan warna teal hardcode-nya sendiri, tidak
+   pernah pakai token ini (lihat catatan di RMOForm.jsx/shared.jsx). */
 :root[data-theme="light"]{
-  --bg:#eef3f3;--s1:#ffffff;--s2:#eef0f5;--s3:#dfe3e9;
-  --border:#c5cbd4;--text:#10121a;--muted:#525c6b;--dim:#9aa3b0;
-  --accent:#0e5a52;--accent2:#14746a;--green:#0f8c3f;--red:#c81e3a;
+  --bg:#f2efe6;--s1:#ffffff;--s2:#f6f7fb;--s3:#eceef5;
+  --border:#dde1f0;--text:#1f2347;--muted:#6b7093;--dim:#a7acc9;
+  --accent:#2b2f6e;--accent2:#5a62d6;--green:#0f8c3f;--red:#c81e3a;
   --blue:#1d4ed8;--purple:#6d28d9;--yellow:#c2660a;
 
-  --sidebar-bg:#f7f8fa;
-  --card-border:rgba(16,18,26,.14);
-  --card-shadow:0 1px 3px rgba(16,24,40,.07),0 6px 16px rgba(16,24,40,.09);
-  --card-shadow-hover:0 3px 6px rgba(16,24,40,.08),0 10px 26px rgba(16,24,40,.13);
-  --input-bg:#eef0f5;
-  --input-border:#b8c0cc;
+  --sidebar-bg:#14173f;
+  --sidebar-text:#9aa0c8;
+  --sidebar-text-hover:#ffffff;
+  --sidebar-active-bg:rgba(255,255,255,.08);
+  --sidebar-active-text:#ffffff;
+  --sidebar-border:rgba(255,255,255,.08);
+  --card-border:rgba(43,48,110,.10);
+  --card-shadow:0 1px 3px rgba(38,43,107,.06),0 6px 16px rgba(38,43,107,.08);
+  --card-shadow-hover:0 3px 6px rgba(38,43,107,.08),0 10px 26px rgba(38,43,107,.13);
+  --input-bg:#f6f7fb;
+  --input-border:#dde1f2;
   --btn-hover-bg:var(--s3);
 }
 :root[data-theme="light"] .conn-dot.connecting{background:var(--yellow)}
@@ -75,25 +95,37 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
 }
 .mobile-sidebar{
   position:absolute;top:0;left:0;bottom:0;width:260px;
-  background:var(--sidebar-bg);border-right:1px solid var(--border);
+  background:var(--sidebar-bg);border-right:1px solid var(--sidebar-border);
   display:flex;flex-direction:column;overflow-y:auto;padding:10px 0;
   animation:drawerIn .25s ease
 }
 @keyframes drawerIn{from{transform:translateX(-100%)}to{transform:translateX(0)}}
+/* Drawer duduk di atas --sidebar-bg (navy gelap di tema terang baru) --
+   .logo/.sb-item/.modal-close aslinya dipakai juga di tempat lain yang
+   latarnya terang, jadi override warnanya di-scope ke .mobile-sidebar
+   saja supaya pemakaian classnya di tempat lain tidak ikut berubah. */
+.mobile-sidebar .logo,.mobile-sidebar .logo svg{color:var(--sidebar-text-hover)}
+.mobile-sidebar .logo span{color:var(--sidebar-text)}
+.mobile-sidebar .modal-close{color:var(--sidebar-text)}
+.mobile-sidebar .modal-close:hover{color:var(--sidebar-text-hover)}
+.mobile-sidebar .sb-section{color:var(--sidebar-text)}
+.mobile-sidebar .sb-item{color:var(--sidebar-text)}
+.mobile-sidebar .sb-item:hover{background:var(--sidebar-active-bg);color:var(--sidebar-text-hover)}
+.mobile-sidebar .sb-item.active{background:var(--sidebar-active-bg);color:var(--sidebar-active-text);border-left-color:var(--accent2)}
 .drawer-header{display:flex;justify-content:space-between;align-items:center;padding:10px 16px 6px}
 /* App Sidebar -- icon rail by default (collapsed), widens + shows labels
    when .shell has "sidebar-open" (toggled from the chevron button inside
    the rail itself, see AppSidebar.jsx). Grid column width is driven by
    .shell/.shell.sidebar-open above; this block only handles what's shown
    inside the rail at each width. */
-.app-sidebar{grid-row:2;display:flex;flex-direction:column;background:var(--s1);border-right:1px solid var(--border);overflow-x:hidden;overflow-y:auto;padding:10px 8px;gap:2px}
-.asb-toggle{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:7px;cursor:pointer;color:var(--muted);background:transparent;border:none;flex-shrink:0;align-self:flex-end;margin-top:6px;transition:background .15s,color .15s}
-.asb-toggle:hover{background:var(--s2);color:var(--text)}
+.app-sidebar{grid-row:2;display:flex;flex-direction:column;background:var(--sidebar-bg);border-right:1px solid var(--sidebar-border);overflow-x:hidden;overflow-y:auto;padding:10px 8px;gap:2px}
+.asb-toggle{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:7px;cursor:pointer;color:var(--sidebar-text);background:transparent;border:none;flex-shrink:0;align-self:flex-end;margin-top:6px;transition:background .15s,color .15s}
+.asb-toggle:hover{background:var(--sidebar-active-bg);color:var(--sidebar-text-hover)}
 .shell:not(.sidebar-open) .asb-toggle{align-self:center}
-.asb-section{font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:600;padding:10px 12px 6px;white-space:nowrap}
-.asb-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:7px;cursor:pointer;font-size:12.5px;color:var(--muted);transition:background .15s,color .15s;user-select:none;white-space:nowrap}
-.asb-item:hover{background:var(--s2);color:var(--text)}
-.asb-item.active{background:var(--s2);color:var(--accent);font-weight:500;border-left:2px solid var(--accent);padding-left:10px}
+.asb-section{font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--sidebar-text);font-weight:600;padding:10px 12px 6px;white-space:nowrap}
+.asb-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:7px;cursor:pointer;font-size:12.5px;color:var(--sidebar-text);transition:background .15s,color .15s;user-select:none;white-space:nowrap}
+.asb-item:hover{background:var(--sidebar-active-bg);color:var(--sidebar-text-hover)}
+.asb-item.active{background:var(--sidebar-active-bg);color:var(--sidebar-active-text);font-weight:500;border-left:2px solid var(--accent2);padding-left:10px}
 .asb-label{overflow:hidden;text-overflow:ellipsis}
 /* Collapsed (default) state -- icons only, centered, section headers hidden */
 .shell:not(.sidebar-open) .asb-section{display:none}
@@ -210,12 +242,21 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
 .group-box{position:relative;border:1px solid var(--border);border-radius:8px;padding:16px 16px 14px;margin-top:12px;background:var(--s1)}
 .group-box-title{position:absolute;top:-10px;left:14px;background:var(--s1);padding:0 8px;font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
 /* RC Harian Produksi / Input Rejection / Input Overtime (RMOPublic.jsx
-   "Panel" component, dipakai di ketiga form itu): label ada yang 1 baris
-   ada yang 2-3 baris (sub-teks penjelasan), jadi input/kotak di baris
-   grid yang sama jadi tidak sejajar kalau cuma display:grid biasa --
-   tiap sel dibikin kolom flex dengan konten didorong ke bawah supaya
-   input-nya selalu sejajar horizontal, berapa pun panjang labelnya. */
-.rc-panel-grid > div,.rc-panel-grid-2 > div,.rc-panel-grid-3 > div{display:flex;flex-direction:column;justify-content:flex-end}
+   "Panel" component, dipakai di ketiga form itu): tiap sel dibikin kolom
+   flex supaya label & input-nya bisa diatur sejajar dalam satu baris
+   grid. justify-content SENGAJA flex-start (rata atas), BUKAN flex-end --
+   dulu flex-end (rata bawah) dipakai supaya input tetap sejajar walau
+   label ada yang 1 vs 2-3 baris (sub-teks). Tapi begitu makin banyak sel
+   yang punya KONTEN TAMBAHAN DI BAWAH input (hint/error/checklist Mesin
+   dkk, bukan cuma label yang beda tinggi), flex-end malah bikin LABEL-nya
+   yang tidak sejajar (sel dengan konten tambahan mendorong labelnya ke
+   atas, sel tanpa itu labelnya "mengambang" turun) -- rata atas jauh
+   lebih konsisten karena label SELALU jadi elemen pertama tiap sel,
+   apa pun yang berubah tinggi di bawahnya (checklist Mesin, hint Manual,
+   pesan error, dst). Elemen yang sengaja perlu tumbuh ke bawah (mis.
+   textarea Problem) diatur pakai flex:1 pada elemen itu sendiri, bukan
+   lagi mengandalkan trik flex-end di sini. */
+.rc-panel-grid > div,.rc-panel-grid-2 > div,.rc-panel-grid-3 > div{display:flex;flex-direction:column;justify-content:flex-start}
 .rc-panel-grid{grid-template-columns:1fr 1fr 1fr 1fr}
 .rc-panel-grid-2{grid-template-columns:1fr 1fr}
 .rc-panel-grid-3{grid-template-columns:1fr 1fr 1fr}
@@ -234,7 +275,29 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
 }
 .rc-2col-grouphead{grid-area:grouphead}
 .rc-2col-aktual{grid-area:aktual;margin-bottom:0!important}
-.rc-2col-problem{grid-area:problem;margin-bottom:0!important}
+/* align-self:stretch (menimpa align-items:start punya .rc-2col) supaya
+   panel ini setinggi baris grid-nya (row 2, 1fr -- ikut tinggi Aktual
+   Produksi di sampingnya), bukan cuma setinggi kontennya sendiri --
+   dipasangkan dengan .rc-panel-stretch/.rc-panel-grid-fill di bawah supaya
+   sisa ruang di dalamnya kepakai (bukan nyisa kosong di bawah field). */
+.rc-2col-problem{grid-area:problem;margin-bottom:0!important;align-self:stretch}
+/* Dipakai lewat prop `stretch` di komponen Panel (shared.jsx) -- child
+   terakhir grid (field yang ditandai flex:1 sendiri, mis. textarea
+   Problem) yang benar-benar mengisi sisa tinggi row terakhir (1fr).
+   Tidak berefek kalau parent tidak punya tinggi definitif buat
+   di-stretch (mis. di HP, lihat @media di bawah -- .rc-2col-problem
+   tidak lagi 1fr di sana), jadi aman dipasang tanpa media query
+   terpisah.
+   3 row eksplisit (bukan 2) -- baris pertama disediakan buat field
+   kondisional "Mesin Problem" (RMOForm.jsx, cuma muncul kalau Mesin
+   dipilih lebih dari satu). SLOT-nya WAJIB tetap dirender (kosong/tanpa
+   isi kalau tidak dipakai, lihat RMOForm.jsx) biar jumlah row tetap 3 --
+   kalau slot itu di-skip total, item-item sesudahnya ikut naik satu row
+   (auto-flow CSS Grid), dan row 1fr yang harusnya buat Problem malah
+   kepakai baris Jenis Problem/Loss Time/Breakdown Mesin, bikin baris itu
+   melar dengan ruang kosong ganjil di dalamnya. */
+.rc-panel-stretch{display:flex;flex-direction:column}
+.rc-panel-grid-fill{flex:1;grid-template-rows:auto auto 1fr}
 
 /* Form RC Harian Produksi / Input Rejection / Input Overtime di layar
    sempit (HP) -- default-nya 4 kolom (Panel) & 2 kolom (Grup Head) pas
@@ -332,7 +395,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
 /* ═══════════════════════════════════════
    TREND CHART
 ═══════════════════════════════════════ */
-.trend-wrap{position:relative;min-height:110px}
+.trend-wrap{position:relative;min-height:110px;flex:1;display:flex;align-items:center}
 .trend-wrap canvas{display:block;width:100%}
 .axis-unit-label{font-size:9px;color:var(--muted);margin-bottom:2px}
 .trend-tooltip{position:absolute;background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:5px 9px;font-size:11px;pointer-events:none;display:none;z-index:5;white-space:nowrap}
@@ -622,6 +685,7 @@ textarea.form-input{resize:vertical;min-height:64px}
 .kpi-row .kpi-card:nth-child(4){animation-delay:.16s}
 .kpi-row .kpi-card:nth-child(5){animation-delay:.20s}
 .loading-pulse{animation:pulse 1.4s infinite}
+.skeleton{background:var(--s3);animation:pulse 1.4s ease-in-out infinite}
 
 /* ═══════════════════════════════════════
    MOBILE  (≤767px)
@@ -735,27 +799,50 @@ textarea.form-input{resize:vertical;min-height:64px}
 
 /* ═══════════════════════════════════════
    LOGIN PAGE
+   Restyle preview (belum di-PR) meniru tampilan login MTN yang baru
+   (202.10.48.79 -- background krem bertekstur grid, kartu putih
+   melayang, judul dua-warna navy/indigo, tombol solid indigo). SEMUA
+   override di-SCOPE ke .login-card/.login-page saja (bukan ubah
+   .form-input/.form-label/.btn.primary global) supaya halaman lain
+   TIDAK ikut berubah -- sesuai aturan migrasi bertahap per komponen di
+   CLAUDE.md, ini baru langkah preview 1 halaman.
 ═══════════════════════════════════════ */
 .login-page{
   min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
   position:relative;overflow:hidden;
   background:
-    radial-gradient(circle at 82% 12%,rgba(255,255,255,.28) 0%,rgba(255,255,255,0) 35%),
-    linear-gradient(180deg,#0c2236 0%,#15406a 22%,#2f6fa3 45%,#6fa8d8 68%,#cfe4f2 88%,#eef1f5 100%);
+    radial-gradient(circle at 18% 8%,rgba(255,255,255,.6) 0%,rgba(255,255,255,0) 42%),
+    linear-gradient(135deg,#f3efe4 0%,#eef0e9 45%,#e8ecf0 100%);
 }
 .login-page::before{
   content:'';position:absolute;inset:0;
-  background:linear-gradient(0deg,rgba(255,255,255,.07),transparent 30%);
+  background-image:
+    linear-gradient(rgba(30,35,70,.045) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(30,35,70,.045) 1px,transparent 1px);
+  background-size:36px 36px;
   pointer-events:none;
 }
-.login-card{position:relative;z-index:1;background:var(--s1);border:1px solid var(--card-border);box-shadow:0 20px 60px rgba(0,0,0,.35);border-radius:14px;padding:32px 28px;width:100%;max-width:360px}
-.login-fs-btn{position:fixed;bottom:20px;right:20px;z-index:10;background:rgba(10,10,18,.55);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:8px 10px;color:rgba(255,255,255,.75);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
-.login-fs-btn:hover{background:rgba(10,10,18,.85);color:#fff;border-color:rgba(255,255,255,.3)}
+.login-card{
+  position:relative;z-index:1;background:#ffffff;border:1px solid rgba(43,48,110,.08);
+  box-shadow:0 30px 60px -20px rgba(43,48,110,.28),0 8px 20px rgba(20,24,50,.06);
+  border-radius:20px;padding:36px 32px;width:100%;max-width:360px;
+}
+.login-card .logo{color:#262b6b;font-size:20px;font-weight:800}
+.login-card .logo span{color:#5a62d6;font-weight:800}
+.login-card .form-label{color:#6b7093;font-weight:600;letter-spacing:.03em}
+.login-card .form-input{background:#f6f7fb;border:1px solid #dde1f2;border-radius:10px;color:#262b45}
+.login-card .form-input:focus{border-color:#6d76e8;box-shadow:0 0 0 3px rgba(109,118,232,.15)}
+.login-card .form-input::placeholder{color:#9aa0c2}
+.login-card .input-icon{color:#8d94c9}
+.login-card .btn.primary{background:#262b6b;border-color:#262b6b;color:#fff;border-radius:10px;font-weight:700}
+.login-card .btn.primary:hover,.login-card .btn.primary:active{opacity:.92}
+.login-fs-btn{position:fixed;bottom:20px;right:20px;z-index:10;background:rgba(38,43,107,.12);backdrop-filter:blur(6px);border:1px solid rgba(38,43,107,.18);border-radius:8px;padding:8px 10px;color:#4a4f7a;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.login-fs-btn:hover{background:rgba(38,43,107,.22);color:#262b6b;border-color:rgba(38,43,107,.3)}
 
 /* ═══════════════════════════════════════
    ADMIN / TARGETS MODAL
 ═══════════════════════════════════════ */
-.asb-version{margin-top:auto;padding:14px 0 6px;text-align:center;font-size:9px;color:var(--muted);opacity:.3;cursor:default;user-select:none;letter-spacing:.06em}
+.asb-version{margin-top:auto;padding:14px 0 6px;text-align:center;font-size:9px;color:var(--sidebar-text);opacity:.5;cursor:default;user-select:none;letter-spacing:.06em}
 .admin-overlay{position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.55);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;animation:fadeIn .15s ease}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 /* Pengganti window.confirm() -- notifikasi konfirmasi hapus di tengah
@@ -929,29 +1016,3 @@ textarea.form-input{resize:vertical;min-height:64px}
 .pres-fab:hover{color:var(--text);background:rgba(30,30,46,.9)}
 /* Fix InfoTip z-index: hovered KPI card rises above siblings */
 .kpi-card:hover{z-index:10}
-
-.skeleton {
-  position: relative;
-  overflow: hidden;
-  background: #2b3444;
-}
-
-.skeleton::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255,255,255,.12),
-    transparent
-  );
-  animation: skeleton-loading 1.2s infinite;
-}
-
-@keyframes skeleton-loading {
-  100% {
-    transform: translateX(100%);
-  }
-}

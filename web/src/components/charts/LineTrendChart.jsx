@@ -103,13 +103,25 @@ function ChartCanvas({
   useEffect(() => {
     if (!visibleData?.length || !canvasRef.current) return;
     const canvas = canvasRef.current;
-    const W      = canvas.parentElement.offsetWidth || 360;
+    const wrapEl = canvas.parentElement;
+    const W      = wrapEl.offsetWidth || 360;
     const m      = visibleData.length;
     const padL   = 34;
     const slotW  = (W - padL - 4) / Math.max(m, 1);
     const rotate = slotW < ROTATE_THRESH;
     const FONT   = 10;
     const padB   = rotate ? 46 : 18;
+    // H SENGAJA tetap formula tetap (bukan wrapEl.clientHeight) -- sempat
+    // dicoba baca tinggi .trend-wrap supaya kanvas ikut mengisi kartu yang
+    // diregangkan lebih tinggi, tapi itu bikin lingkaran setan: tinggi
+    // .trend-wrap (flex:1, tanpa CSS height selain dari kanvas anaknya)
+    // sebagian ikut dipengaruhi tinggi kanvas, ResizeObserver di bawah
+    // mendeteksi perubahan itu lalu redraw dengan H yang lebih besar lagi,
+    // dst -- kartu (dan semua kartu sebaris lewat alignItems:'stretch')
+    // membesar tanpa henti. Ruang kosong sisa di bawah kanvas sekarang
+    // dibiarkan dibagi rata lewat CSS (align-items:center di .trend-wrap,
+    // lihat index.css) supaya tidak menumpuk semua di bawah tanpa perlu
+    // kanvas ikut membesar.
     const H      = 130 + (rotate ? 28 : 0);
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
@@ -120,6 +132,11 @@ function ChartCanvas({
     const styles  = getComputedStyle(document.documentElement);
     const muted   = styles.getPropertyValue('--muted').trim() || '#5a5a78';
     const accent2 = styles.getPropertyValue('--accent2').trim() || '#ff6b35';
+    // Cincin putih di titik data dulu hardcode '#fff' -- di tema terang
+    // baru (kartu putih juga) itu jadi nyaris tidak kelihatan (putih di
+    // atas putih). Pakai warna permukaan kartu (--s1) supaya "cincin
+    // pemisah"-nya tetap kontras dari garis tren, apa pun temanya.
+    const dotRing = styles.getPropertyValue('--s1').trim() || '#fff';
     // Canvas tidak resolve custom property CSS (var(--x)) sendiri — kalau
     // warna dikirim sebagai var(--x), ambil nilai aktualnya di sini.
     const resolveColor = (c) => {
@@ -128,6 +145,8 @@ function ChartCanvas({
     };
     const resolvedMovingAvgColor = resolveColor(movingAvgColor);
     const resolvedTargetColor    = resolveColor(targetColor);
+    const resolvedColor          = resolveColor(color);
+    const resolvedOverTargetColor = resolveColor(overTargetColor);
 
     const vals    = visibleData.map((d) => d[valueKey] ?? 0);
     const targets = targetKey ? visibleData.map((d) => d[targetKey] ?? 0) : [];
@@ -155,7 +174,7 @@ function ChartCanvas({
       ctx.fillStyle = c;
       ctx.fill();
       ctx.lineWidth = 1.4;
-      ctx.strokeStyle = '#fff';
+      ctx.strokeStyle = dotRing;
       ctx.stroke();
     }
 
@@ -187,9 +206,9 @@ function ChartCanvas({
         const x = xOf(i); const y = yOf(v);
         const h = (pad.t + iH) - y;
         const r = Math.min(4, barW / 2);
-        let bc = color;
-        if (overTargetColor && targetKey && v > targets[i] && targets[i] > 0) bc = overTargetColor;
-        else if (!(isTotal && i === m - 1)) bc = color + 'cc';
+        let bc = resolvedColor;
+        if (resolvedOverTargetColor && targetKey && v > targets[i] && targets[i] > 0) bc = resolvedOverTargetColor;
+        else if (!(isTotal && i === m - 1)) bc = resolvedColor + 'cc';
         ctx.fillStyle = bc;
         if (h > 0) {
           ctx.beginPath();
@@ -259,7 +278,7 @@ function ChartCanvas({
       ctx.strokeStyle = 'rgba(150,150,180,.55)';
       ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
 
-      drawDot(x, yOf(vals[idx]), color);
+      drawDot(x, yOf(vals[idx]), resolvedColor);
     }
 
     drawBase();
@@ -288,9 +307,19 @@ function ChartCanvas({
     canvas.ontouchend   = () => setTimeout(() => { drawBase(); tip.style.display = 'none'; }, 1500);
   }, [visibleData, valueKey, targetKey, color, unit, hourly, showMovingAvg, movingAvgColor, overTargetColor, fixedMax, tick]);
 
+  // Redraw kalau .trend-wrap berubah ukuran -- bukan cuma sekali saat
+  // mount (dulu cuma requestAnimationFrame sekali, jadi kartu yang
+  // diregangkan belakangan lewat flex, atau ukuran layout yang berubah
+  // karena zoom browser/resize window, tidak pernah bikin chart re-plot
+  // ukurannya). ResizeObserver juga langsung memberi ukuran final segera
+  // setelah observe() dipanggil, jadi sekalian gantikan trik RAF sekali
+  // jalan yang lama.
   useEffect(() => {
-    const id = requestAnimationFrame(() => setTick((t) => t + 1));
-    return () => cancelAnimationFrame(id);
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setTick((t) => t + 1));
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   return (
@@ -305,7 +334,7 @@ export default function LineTrendChart({
   title, data, valueKey, targetKey, color, unit, hourly = false,
   showMovingAvg = false, movingAvgColor = '#f0a500',
   overTargetColor = null, targetColor = 'rgba(150,150,180,.7)',
-  legendItems = null,
+  legendItems = null, bare = false,
 }) {
   const fixedMax = unit === '%' ? 100 : null;
   const legend = legendItems || (() => {
@@ -315,11 +344,16 @@ export default function LineTrendChart({
     return items;
   })();
 
-  return (
-    <div className="card">
-      <div className="card-header">
-        <div className="card-title">{title}</div>
-      </div>
+  // `bare` -- lewati .card + header sendiri kalau pemanggil (mis.
+  // ARDetail/OEEDetail/RejectionDetail/OvertimeDetail) sudah membungkus
+  // komponen ini dengan .card + card-title sendiri (dulu dikirim
+  // title="" untuk itu, tapi tetap merender .card KEDUA bersarang di
+  // dalam .card pertama -- .trend-wrap di dalamnya jadi tidak pernah ikut
+  // meregang mengisi tinggi .card luar walau .card luar sendiri sudah
+  // diregangkan lewat alignItems:'stretch', nyisa ruang kosong di bawah
+  // grafik). Kontennya sama persis, cuma tanpa pembungkus .card+header.
+  const content = (
+    <>
       <div className="axis-unit-label">{unit === '%' ? 'Persentase (%)' : 'Waktu (Jam)'}</div>
       <ChartCanvas
         data={data} valueKey={valueKey} targetKey={targetKey}
@@ -342,6 +376,17 @@ export default function LineTrendChart({
           </div>
         ))}
       </div>
+    </>
+  );
+
+  if (bare) return content;
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="card-title">{title}</div>
+      </div>
+      {content}
     </div>
   );
 }

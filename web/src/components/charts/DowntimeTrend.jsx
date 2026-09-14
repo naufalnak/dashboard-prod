@@ -17,6 +17,13 @@ function formatAxisLabel(label) {
   return s;
 }
 
+function hexToRgba(hex, alpha) {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return hex;
+  const [r, g, b] = m.slice(1).map((h) => parseInt(h, 16));
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 function calcMovingAvg(arr, w = 3) {
   return arr.map((_, i) => {
     const half = Math.floor(w / 2);
@@ -89,6 +96,8 @@ function ChartCanvas({ days }) {
 
     const styles  = getComputedStyle(document.documentElement);
     const muted   = styles.getPropertyValue('--muted').trim() || '#5a5a78';
+    const blue    = styles.getPropertyValue('--blue').trim() || '#4488ff';
+    const yellow  = styles.getPropertyValue('--yellow').trim() || '#f0a500';
     const barWMax = Math.max(3, Math.min(slotW * 0.55, 40));
     const xOf     = (i) => pad.l + i * slotW + (slotW - barWMax) / 2;
     const cxOf    = (i) => pad.l + i * slotW + slotW / 2;
@@ -114,12 +123,12 @@ function ChartCanvas({ days }) {
 
     // Bars
     const g = ctx.createLinearGradient(0, pad.t, 0, H);
-    g.addColorStop(0, '#4488ff'); g.addColorStop(1, 'rgba(68,136,255,.3)');
+    g.addColorStop(0, blue); g.addColorStop(1, hexToRgba(blue, .3));
     vals.forEach((v, i) => {
       const dayLabel  = visible[i].day || '';
       const isCurrent = dayLabel === currentMonthAbbr;
       if (isCurrent) {
-        ctx.fillStyle = 'rgba(68,136,255,.07)';
+        ctx.fillStyle = hexToRgba(blue, .07);
         ctx.fillRect(pad.l + i * slotW, pad.t, slotW, iH);
       }
       const x = xOf(i); const r = Math.min(4, barWMax / 2);
@@ -142,7 +151,7 @@ function ChartCanvas({ days }) {
     // Moving average line
     if (vals.length >= 2) {
       const mavg = calcMovingAvg(vals);
-      ctx.beginPath(); ctx.lineWidth = 2; ctx.strokeStyle = '#f0a500';
+      ctx.beginPath(); ctx.lineWidth = 2; ctx.strokeStyle = yellow;
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       mavg.forEach((v, i) => {
         if (i === 0) ctx.moveTo(cxOf(i), yOf(v)); else ctx.lineTo(cxOf(i), yOf(v));
@@ -150,7 +159,7 @@ function ChartCanvas({ days }) {
       ctx.stroke();
       mavg.forEach((v, i) => {
         ctx.beginPath(); ctx.arc(cxOf(i), yOf(v), 2.5, 0, Math.PI * 2);
-        ctx.fillStyle = '#f0a500'; ctx.fill();
+        ctx.fillStyle = yellow; ctx.fill();
       });
     }
 
@@ -163,7 +172,7 @@ function ChartCanvas({ days }) {
       if (i % step !== 0 && i !== m - 1) return;
       const isCurrent = d.day === currentMonthAbbr;
       const label = formatAxisLabel(d.day);
-      ctx.fillStyle = isCurrent ? '#4488ff' : muted;
+      ctx.fillStyle = isCurrent ? blue : muted;
       ctx.font      = isCurrent
         ? `bold ${FONT}px Inter, sans-serif`
         : `${FONT}px Inter, sans-serif`;
@@ -213,11 +222,11 @@ function ChartCanvas({ days }) {
       </div>
       <div className="chart-legend" style={{ marginTop: 8 }}>
         <div className="legend-item">
-          <span className="legend-swatch" style={{ background: '#4488ff' }}></span>
+          <span className="legend-swatch" style={{ background: 'var(--blue)' }}></span>
           Downtime (jam)
         </div>
         <div className="legend-item">
-          <span style={{ display: 'inline-block', width: 18, height: 2, background: '#f0a500', borderRadius: 1, verticalAlign: 'middle', marginRight: 4 }}></span>
+          <span style={{ display: 'inline-block', width: 18, height: 2, background: 'var(--yellow)', borderRadius: 1, verticalAlign: 'middle', marginRight: 4 }}></span>
           Average
         </div>
         {hasNoData && (

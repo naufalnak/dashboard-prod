@@ -1,17 +1,16 @@
-import Skeleton from '../components/ui/Skeleton.jsx';
-import TableSkeleton from '../components/ui/TableSkeleton.jsx';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { useUI } from '../contexts/UIContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { fetchRejectionBreakdown, fetchRejectionTrend, fetchRejectionEntries } from '../services/rejectionService.js';
-import MiniRing from '../components/charts/MiniRing.jsx';
+import { apiFetch } from '../api.js';
+import MiniRing from '../components/MiniRing.jsx';
 import LineTrendChart from '../components/charts/LineTrendChart.jsx';
-import { CLUSTER_COLORS } from '../components/charts/ClusterBarList.jsx';
-import HorizontalBarList from '../components/charts/HorizontalBarList.jsx';
+import { CLUSTER_COLORS } from '../components/ClusterBarList.jsx';
+import HorizontalBarList from '../components/HorizontalBarList.jsx';
 import KriteriaNgChart from '../components/charts/KriteriaNgChart.jsx';
-import PeriodPicker from '../components/maintenance/PeriodPicker.jsx';
-import ZoomCell from '../components/ui/ZoomCell.jsx';
+import PeriodPicker from '../components/PeriodPicker.jsx';
+import ZoomCell from '../components/ZoomCell.jsx';
+import { SkeletonCircle, SkeletonBlock, SkeletonRows } from '../components/Skeleton.jsx';
 import { formatDateID } from '../dateFmt.js';
 
 const MAIN_SIZE = 200;
@@ -47,20 +46,26 @@ export default function RejectionDetail() {
     setLoading(true);
     const qs = `period=${period}&date=${refDate}${clusterFilter !== 'all' ? `&cluster=${clusterFilter}` : ''}`;
     Promise.all([
-      fetchRejectionBreakdown(qs, { byCluster: [], byPartName: [], kriteriaNg: [] }, logout),
-      fetchRejectionTrend(qs, [], logout),
-      fetchRejectionEntries(qs, { rows: [] }, logout),
-    ]).then(([b, t, r]) => {
-      setByCluster(b.byCluster);
-      setByPartName(b.byPartName);
+      apiFetch(`/rejection-by-cluster?${qs}`, [], logout),
+      apiFetch(`/rejection-by-partname?${qs}`, [], logout),
+      apiFetch(`/rejection-trend?${qs}`, [], logout),
+      apiFetch(`/kriteria-ng-stats?${qs}`, [], logout),
+      apiFetch(`/rejection-entries?${qs}`, [], logout),
+    ]).then(([c, p, t, k, r]) => {
+      setByCluster(c);
+      setByPartName(p);
       setTrend(t);
-      setKriteriaNg(b.kriteriaNg);
-      setRecent(r.rows || []);
+      setKriteriaNg(k);
+      setRecent(r);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [period, refDate, clusterFilter, logout]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Sub-judul kartu ikut filter Cluster yang aktif, sama pola dengan
+  // ARDetail/OEEDetail.
+  const clusterLabel = clusterFilter === 'all' ? 'Semua Cluster' : `Cluster ${clusterFilter}`;
 
   const avgRejection = byCluster.length ? Number((byCluster.reduce((s, c) => s + c.rejection, 0) / byCluster.length).toFixed(1)) : 0;
   const trendWithTarget = useMemo(() => trend.map((d) => ({ ...d, target: REJECTION_TARGET })), [trend]);
@@ -101,9 +106,14 @@ export default function RejectionDetail() {
 
       <div className="row4" style={{ gridTemplateColumns: '0.95fr 0.95fr 1.3fr', marginBottom: 16, alignItems: 'stretch' }}>
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div className="card-header"><div className="card-title">Rejection Cluster</div></div>
+          <div className="card-header"><div className="card-title">Rejection {clusterLabel}</div></div>
           {loading ? (
-            <Skeleton width="100%" height={160} radius={8} />
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
+              <SkeletonCircle size={MAIN_SIZE} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {[0, 1, 2, 3].map((i) => <SkeletonCircle key={i} size={MINI_SIZE} />)}
+              </div>
+            </div>
           ) : byCluster.length === 0 ? (
             <div style={{ color: 'var(--muted)', fontSize: 12 }}>Belum ada data.</div>
           ) : (
@@ -122,9 +132,11 @@ export default function RejectionDetail() {
         </div>
 
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div className="card-header"><div className="card-title">Kriteria NG</div></div>
+          <div className="card-header"><div className="card-title">Kriteria NG {clusterLabel}</div></div>
           {loading ? (
-            <Skeleton width="100%" height={160} radius={8} />
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <SkeletonCircle size={MAIN_SIZE} />
+            </div>
           ) : (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <KriteriaNgChart data={kriteriaNg} mainSize={MAIN_SIZE} miniSize={MINI_SIZE} />
@@ -132,49 +144,53 @@ export default function RejectionDetail() {
           )}
         </div>
 
-        <div className="card">
+        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-header">
-            <div className="card-title">Tren Rejection</div>
+            <div className="card-title">Tren Rejection {clusterLabel}</div>
           </div>
-          <LineTrendChart
-            title=""
-            data={trendWithTarget}
-            valueKey="rejection"
-            targetKey="target"
-            color="#d9534f"
-            unit="%"
-            showMovingAvg
-            movingAvgColor="var(--blue)"
-            targetColor="var(--red)"
-          />
+          {loading ? (
+            <SkeletonBlock height={220} />
+          ) : (
+            <LineTrendChart
+              bare
+              data={trendWithTarget}
+              valueKey="rejection"
+              targetKey="target"
+              color="var(--red)"
+              unit="%"
+              showMovingAvg
+              movingAvgColor="var(--blue)"
+              targetColor="var(--red)"
+            />
+          )}
         </div>
       </div>
 
       <div className="row4" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 16, alignItems: 'stretch' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div className="card-header"><div className="card-title">5 Part Name Reject Tertinggi</div></div>
+            <div className="card-header"><div className="card-title">5 Part Name Reject Tertinggi — {clusterLabel}</div></div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <HorizontalBarList data={highest5} mode="bad" valueKey="rejection" />
+              {loading ? <SkeletonRows rows={5} /> : <HorizontalBarList data={highest5} mode="bad" valueKey="rejection" />}
             </div>
           </div>
           <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div className="card-header"><div className="card-title">5 Part Name Reject Terendah</div></div>
+            <div className="card-header"><div className="card-title">5 Part Name Reject Terendah — {clusterLabel}</div></div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <HorizontalBarList data={lowest5} mode="good" valueKey="rejection" />
+              {loading ? <SkeletonRows rows={5} /> : <HorizontalBarList data={lowest5} mode="good" valueKey="rejection" />}
             </div>
           </div>
         </div>
 
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-header">
-            <div className="card-title">Data Rejection Terbaru</div>
+            <div className="card-title">Data Rejection Terbaru — {clusterLabel}</div>
             <button className="card-action" style={{ display: 'flex', alignItems: 'center', gap: 4 }} onClick={() => navigate('datarejection')}>
               Lihat Semua <ChevronRight size={12} />
             </button>
           </div>
           {loading ? (
-            <TableSkeleton rows={5} columns={6} />
+            <SkeletonRows rows={6} />
           ) : recentView.length === 0 ? (
             <div style={{ color: 'var(--muted)', fontSize: 12 }}>Belum ada data.</div>
           ) : (

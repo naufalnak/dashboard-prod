@@ -1,25 +1,31 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Plus, Trash2, Pencil, X } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Plus, Trash2, Pencil, X, MoreVertical } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { fetchProblemLog, createProblemLog, updateProblemLog, deleteProblemLog } from '../services/problemLogService.js';
-import { usePaginatedList, PAGE_SIZE } from '../hooks/usePaginatedList.js';
+import { apiFetch, apiSend } from '../api.js';
 import { useToast } from '../contexts/ToastContext.jsx';
 import { useConfirm } from '../contexts/ConfirmContext.jsx';
 import { isPrivilegedUser } from '../roles.js';
-import SortTh from '../components/ui/SortTh.jsx';
-import Combobox from '../components/ui/Combobox.jsx';
-import Pagination from '../components/ui/Pagination.jsx';
-import EmptyErrorState from '../components/ui/EmptyErrorState.jsx';
-import { TableRowsSkeleton } from '../components/ui/Skeleton.jsx';
-import { useSort } from '../hooks/useSort.js';
+import SortTh from '../components/SortTh.jsx';
+import Combobox from '../components/Combobox.jsx';
+import PeriodPicker from '../components/PeriodPicker.jsx';
+import useHorizontalWheelScroll from '../useHorizontalWheelScroll.js';
+import { useSort } from '../useSort.js';
 import { formatDateID } from '../dateFmt.js';
+import { Skeleton } from '../components/Skeleton.jsx';
 
-const STATUS_LABEL = { open: 'Open', in_progress: 'In Progress', closed: 'Closed' };
-const STATUS_COLOR = { open: 'var(--red)', in_progress: 'var(--yellow)', closed: 'var(--green)' };
+const STATUS_LABEL = { open: 'Open', in_progress: 'On Progress', closed: 'Closed' };
+const STATUS_COLOR = { open: 'var(--red)', in_progress: '#e0a30c', closed: 'var(--green)' };
 const STATUS_OPTS = ['open', 'in_progress', 'closed'];
-const JENIS_PROBLEM_OPTS = ['Machine', 'Material', 'Method', 'Man', 'Environment', 'Setting & Tool'];
+const JENIS_PROBLEM_OPTS = ['Machine', 'Material', 'Method', 'Man', 'Setting & Tool'];
 
 const EMPTY = { tanggal: '', line: '', partName: '', problem: '', jenisProblem: '', rootCause: '', temporaryAction: '', permanentAction: '', dueDate: '', status: 'open' };
+
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+
+function isOverdue(row) {
+  if (!row.dueDate || row.status === 'closed') return false;
+  return new Date(row.dueDate) < new Date(new Date().toDateString());
+}
 
 const inp = {
   background: 'var(--input-bg)', border: '1px solid var(--input-border)',
@@ -50,6 +56,7 @@ function EditProblemModal({ row, onClose, onSaved }) {
     temporaryAction: row.temporaryAction || '', permanentAction: row.permanentAction || '',
     dueDate: row.dueDate ? row.dueDate.slice(0, 10) : '',
     notes: row.notes || '',
+    lossTime: row.lostTime ?? 0,
   });
   const [busy, setBusy] = useState(false);
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
@@ -58,7 +65,7 @@ function EditProblemModal({ row, onClose, onSaved }) {
     if (!form.problem.trim()) return;
     setBusy(true);
     try {
-      await updateProblemLog({
+      await apiSend('/problem-log-update', 'POST', {
         id: row.id,
         tanggal: form.tanggal || null,
         line: form.line, part_name: form.partName,
@@ -66,6 +73,7 @@ function EditProblemModal({ row, onClose, onSaved }) {
         temporary_action: form.temporaryAction, permanent_action: form.permanentAction,
         due_date: form.dueDate || null,
         notes: form.notes,
+        lost_time: form.lossTime,
       }, logout);
       showToast('Problem berhasil diperbarui', 'green');
       onSaved();
@@ -90,7 +98,12 @@ function EditProblemModal({ row, onClose, onSaved }) {
             <EditField label="Problem *"><input style={inp} value={form.problem} onChange={(e) => set('problem', e.target.value)} /></EditField>
           </div>
           <EditField label="Jenis Problem"><Combobox style={inp} value={form.jenisProblem} options={JENIS_PROBLEM_OPTS} onChange={(v) => set('jenisProblem', v)} placeholder="Ketik atau pilih…" /></EditField>
-          <div />
+          <EditField label="Loss Time (menit)">
+            <input type="number" style={inp} value={form.lossTime} onChange={(e) => set('lossTime', e.target.value)} />
+          </EditField>
+          <div style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--muted)', marginTop: -6 }}>
+            Loss Time di sini ikut mengubah baris RC Harian Produksi terkait (kalau baris ini otomatis tersinkron dari sana).
+          </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <EditField label="Root Cause"><input style={inp} value={form.rootCause} onChange={(e) => set('rootCause', e.target.value)} /></EditField>
           </div>
@@ -111,9 +124,38 @@ function EditProblemModal({ row, onClose, onSaved }) {
 
 function DetailRow({ label, value }) {
   return (
-    <div style={{ marginBottom: 14 }}>
+    <div style={{ marginBottom: 14, minWidth: 0 }}>
       <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 3 }}>{label}</div>
       <div style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{value || '—'}</div>
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  const color = STATUS_COLOR[status] || 'var(--muted)';
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 99,
+      fontSize: 12, fontWeight: 700, color, background: 'var(--s2)', border: `1px solid ${color}`,
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+      {STATUS_LABEL[status] || status}
+    </span>
+  );
+}
+
+// Judul kecil pembatas antar kelompok field -- supaya pembaca bisa
+// langsung memindai bagian mana yang dia cari (Info Dasar / Downtime /
+// Tindak Lanjut), bukan satu blok panjang tanpa struktur.
+function DetailSection({ title, children }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 10, paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
+        {title}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+        {children}
+      </div>
     </div>
   );
 }
@@ -121,35 +163,86 @@ function DetailRow({ label, value }) {
 // Rangkuman detail satu baris Problem, tampilan penuh tanpa terpotong --
 // dibuka dengan klik baris di tabel (yang sekarang cuma menampilkan
 // kolom ringkas supaya muat 100% lebar layar tanpa scroll horizontal).
+// Dikelompokkan per bagian (Info Dasar/Downtime/Tindak Lanjut) supaya
+// lebih mudah dipindai dibanding satu grid panjang tanpa pembatas.
 function DetailProblemModal({ row, onClose }) {
+  const totalLossTime = row.totalLossTime ?? (row.lostTime || 0) + (row.breakdownMesin || 0);
   return (
     <div className="overlay show" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 560, borderRadius: 14, margin: 'auto' }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal" style={{ maxWidth: 560, borderRadius: 14, margin: 'auto', maxHeight: '85vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">Detail Problem</div>
           <button className="modal-close" onClick={onClose}><X size={20} /></button>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+          <StatusBadge status={row.status} />
+          {row.status === 'closed' && row.closedAt && (
+            <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Ditutup {new Date(row.closedAt).toLocaleString('id-ID')}</span>
+          )}
+        </div>
+
+        <DetailSection title="Info Dasar">
           <DetailRow label="Tanggal" value={formatDateID(row.tanggal)} />
-          <DetailRow label="Due Date" value={formatDateID(row.dueDate)} />
           <DetailRow label="Line Produksi" value={row.line} />
           <DetailRow label="Part Name" value={row.partName} />
-          <div style={{ gridColumn: '1 / -1' }}><DetailRow label="Problem" value={row.problem} /></div>
           <DetailRow label="Jenis Problem" value={row.jenisProblem} />
-          <div>
-            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 3 }}>Status</div>
-            <span style={{ color: STATUS_COLOR[row.status] || 'var(--muted)', fontWeight: 700, fontSize: 13.5 }}>{STATUS_LABEL[row.status] || row.status}</span>
-          </div>
+          <div style={{ gridColumn: '1 / -1' }}><DetailRow label="Problem" value={row.problem} /></div>
+        </DetailSection>
+
+        <DetailSection title="Downtime & Due Date">
+          <DetailRow label="Due Date" value={formatDateID(row.dueDate)} />
+          <DetailRow
+            label="Total Loss Time"
+            value={totalLossTime > 0 ? `${totalLossTime} menit (Loss Time ${row.lostTime || 0} + Breakdown Mesin ${row.breakdownMesin || 0})` : null}
+          />
+        </DetailSection>
+
+        <DetailSection title="Root Cause & Tindak Lanjut">
           <div style={{ gridColumn: '1 / -1' }}><DetailRow label="Root Cause" value={row.rootCause} /></div>
           <DetailRow label="Temporary Action" value={row.temporaryAction} />
           <DetailRow label="Permanent Action" value={row.permanentAction} />
           <div style={{ gridColumn: '1 / -1' }}><DetailRow label="Notes" value={row.notes} /></div>
-          <DetailRow label="Ditutup" value={row.status === 'closed' && row.closedAt ? new Date(row.closedAt).toLocaleString('id-ID') : null} />
-        </div>
+        </DetailSection>
+
         <div className="modal-footer">
           <button className="btn" onClick={onClose} style={{ width: '100%' }}>Tutup</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Menu titik-tiga per baris (Edit Problem / Hapus) -- gantikan dua tombol
+// ikon terpisah yang sebelumnya makan tempat di kolom Aksi, supaya kolom
+// baru (Due Date/Permanent Action/Notes) muat tanpa tabel makin lebar.
+function RowActionsMenu({ onEdit, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    function onDocClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }} onClick={(e) => e.stopPropagation()}>
+      <button onClick={() => setOpen((v) => !v)} style={iconBtn} title="Aksi">
+        <MoreVertical size={14} />
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 60,
+          background: 'var(--s1)', border: '1px solid var(--border)', borderRadius: 8,
+          boxShadow: '0 12px 32px rgba(0,0,0,.18)', minWidth: 150, overflow: 'hidden',
+        }}>
+          <button onClick={() => { setOpen(false); onEdit(); }} style={menuItem}>
+            <Pencil size={13} /> Edit Problem
+          </button>
+          <button onClick={() => { setOpen(false); onDelete(); }} style={{ ...menuItem, color: 'var(--red)' }}>
+            <Trash2 size={13} /> Hapus
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -159,26 +252,25 @@ export default function ProblemLogPage() {
   const showToast = useToast();
   const confirm = useConfirm();
   const canEdit = isPrivilegedUser(username);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState('all');
+  // Filter tanggal sekarang pakai PeriodPicker yang sama dengan tabel lain
+  // (Data Produksi/Downtime Produksi dkk), ganti dua input tanggal "s/d"
+  // yang sebelumnya dipakai di sini sendiri.
+  const [period, setPeriod] = useState('month');
+  const [refDate, setRefDate] = useState(todayStr());
   const [editRow, setEditRow] = useState(null);
   const [detailRow, setDetailRow] = useState(null);
 
-  const {
-    rows, page, setPage, totalPages, total, loading, error, reload: load,
-  } = usePaginatedList(
-    fetchProblemLog,
-    (p, pageSize) => `page=${p}&pageSize=${pageSize}`,
-    [],
-  );
-
-  // Ganti filter status -> balik ke halaman 1. Filter status di sini cuma
-  // menyaring baris yang sudah dimuat di halaman saat ini (lihat catatan
-  // di `shown` di bawah), jadi baris status lain mungkin ada di halaman
-  // lain -- balik ke hal. 1 supaya user tidak nyangkut di tengah.
-  useEffect(() => { setPage(1); }, [filter]);
+  const load = useCallback(() => {
+    setLoading(true);
+    apiFetch(`/problem-log?period=${period}&date=${refDate}`, [], logout).then((d) => { setRows(d); setLoading(false); }).catch(() => setLoading(false));
+  }, [logout, period, refDate]);
+  useEffect(() => { load(); }, [load]);
 
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })); }
 
@@ -186,7 +278,7 @@ export default function ProblemLogPage() {
     if (!form.problem.trim()) return;
     setBusy(true);
     try {
-      await createProblemLog({
+      await apiSend('/problem-log', 'POST', {
         tanggal: form.tanggal || null,
         line: form.line,
         part_name: form.partName,
@@ -206,13 +298,13 @@ export default function ProblemLogPage() {
     setBusy(false);
   }
 
-  // Status Open/Closed adalah toggle sendiri -- tidak bergantung dan tidak
-  // mempengaruhi isi Notes.
-  async function toggleStatus(r) {
-    const next = r.status === 'closed' ? 'open' : 'closed';
+  // Status (Open/On Progress/Closed) independen dari Notes -- pilihan
+  // langsung dari tabel, tidak perlu buka Edit Problem.
+  async function setStatus(r, next) {
+    if (next === r.status) return;
     try {
-      await updateProblemLog({ id: r.id, status: next }, logout);
-      showToast(next === 'closed' ? 'Problem ditandai Closed' : 'Problem ditandai Open', 'green');
+      await apiSend('/problem-log-update', 'POST', { id: r.id, status: next }, logout);
+      showToast(`Problem ditandai ${STATUS_LABEL[next]}`, 'green');
       load();
     } catch (e) { showToast(e.message, 'red'); }
   }
@@ -220,15 +312,12 @@ export default function ProblemLogPage() {
   async function remove(id) {
     if (!(await confirm('Hapus catatan problem ini?'))) return;
     try {
-      await deleteProblemLog(id, logout);
+      await apiSend('/problem-log-delete', 'POST', { id }, logout);
       showToast('Problem berhasil dihapus', 'green');
       load();
     } catch (e) { showToast(e.message, 'red'); }
   }
 
-  // Catatan: `filter` status di sini cuma menyaring baris di halaman yang
-  // lagi dimuat (lihat Pagination di bawah tabel), bukan lintas semua
-  // data -- makanya ganti filter juga balik ke halaman 1 di atas.
   const shown = useMemo(() => {
     const filtered = filter === 'all' ? rows : rows.filter((r) => r.status === filter);
     // Data dengan Tanggal terbaru selalu di atas -- id cuma tiebreaker
@@ -238,6 +327,7 @@ export default function ProblemLogPage() {
   }, [rows, filter]);
 
   const { sorted: sortedShown, sortKey, sortDir, toggleSort } = useSort(shown);
+  const scrollRef = useHorizontalWheelScroll();
 
   return (
     <div className="page-view active">
@@ -245,7 +335,8 @@ export default function ProblemLogPage() {
         <div>
           <div className="page-title">Problem Produksi</div>
         </div>
-        <div className="header-actions" style={{ display: 'flex', gap: 8 }}>
+        <div className="header-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <PeriodPicker pill period={period} setPeriod={setPeriod} refDate={refDate} setRefDate={setRefDate} />
           <select style={{ ...inp, width: 150 }} value={filter} onChange={(e) => setFilter(e.target.value)}>
             <option value="all">Semua Status</option>
             {STATUS_OPTS.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
@@ -268,7 +359,7 @@ export default function ProblemLogPage() {
             <input type="date" placeholder="Tanggal" style={inp} value={form.tanggal} onChange={(e) => set('tanggal', e.target.value)} />
             <input placeholder="Line Produksi" style={inp} value={form.line} onChange={(e) => set('line', e.target.value)} />
             <input placeholder="Part Name" style={inp} value={form.partName} onChange={(e) => set('partName', e.target.value)} />
-            <Combobox value={form.jenisProblem} options={JENIS_PROBLEM_OPTS} onChange={(v) => set('jenisProblem', v)} placeholder="Jenis Problem (4M+1E)…" style={inp} />
+            <Combobox value={form.jenisProblem} options={JENIS_PROBLEM_OPTS} onChange={(v) => set('jenisProblem', v)} placeholder="Jenis Problem…" style={inp} />
             <div style={{ gridColumn: '1 / -1' }}>
               <input placeholder="Problem *" style={inp} value={form.problem} onChange={(e) => set('problem', e.target.value)} />
             </div>
@@ -290,66 +381,90 @@ export default function ProblemLogPage() {
 
       <div className="card">
         <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
-          Klik baris untuk lihat rangkuman detail lengkap.
+          Klik baris untuk lihat rangkuman detail lengkap. Tanggal Due Date berwarna merah berarti sudah lewat jatuh tempo.
         </div>
-        <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'fixed' }}>
-          <colgroup>
-            <col style={{ width: '10%' }} />
-            <col style={{ width: '13%' }} />
-            <col style={{ width: '15%' }} />
-            <col style={{ width: '27%' }} />
-            <col style={{ width: '13%' }} />
-            <col style={{ width: '10%' }} />
-            <col style={{ width: canEdit ? '12%' : '0%' }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <SortTh sortKeyName="tanggal" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>Tanggal</SortTh>
-              <SortTh sortKeyName="line" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>Line Produksi</SortTh>
-              <SortTh sortKeyName="partName" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>Part Name</SortTh>
-              <SortTh sortKeyName="problem" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>Problem</SortTh>
-              <SortTh sortKeyName="jenisProblem" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>Jenis Problem</SortTh>
-              <SortTh sortKeyName="status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>Status</SortTh>
-              {canEdit && <th style={thGrid}>Aksi</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {loading && rows.length === 0 ? (
-              <TableRowsSkeleton rows={6} colSpan={7} />
-            ) : sortedShown.length === 0 ? (
-              <EmptyErrorState as="row" colSpan={7} status={error ? 'error' : 'empty'} onRetry={load} emptyText={rows.length === 0 ? 'Belum ada data.' : 'Tidak ada yang cocok dengan filter status ini.'} />
-            ) : sortedShown.map((r) => (
-              <tr key={r.id} onClick={() => setDetailRow(r)} style={{ cursor: 'pointer' }}>
-                <td style={tdEllipsis}>{formatDateID(r.tanggal)}</td>
-                <td style={tdEllipsis} title={r.line || ''}>{r.line || '—'}</td>
-                <td style={tdEllipsis} title={r.partName || ''}>{r.partName || '—'}</td>
-                <td style={tdEllipsis} title={r.problem || ''}>{r.problem}</td>
-                <td style={tdEllipsis} title={r.jenisProblem || ''}>{r.jenisProblem || '—'}</td>
-                <td style={td}>
-                  {canEdit ? (
-                    <button onClick={(e) => { e.stopPropagation(); toggleStatus(r); }} style={{ ...statusBtn, color: STATUS_COLOR[r.status] || 'var(--muted)', borderColor: STATUS_COLOR[r.status] || 'var(--border)' }} title="Ganti status">
-                      {STATUS_LABEL[r.status] || r.status}
-                    </button>
-                  ) : (
-                    <span style={{ color: STATUS_COLOR[r.status] || 'var(--muted)', fontWeight: 700 }}>{STATUS_LABEL[r.status] || r.status}</span>
-                  )}
-                </td>
-                {canEdit && (
-                  <td style={td}>
-                    <div style={{ display: 'flex', gap: 4 }} onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => setEditRow(r)} style={iconBtn} title="Edit Problem"><Pencil size={13} /></button>
-                      <button onClick={() => remove(r.id)} style={{ ...iconBtn, color: 'var(--red)' }} title="Hapus">
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </td>
-                )}
+        <div ref={scrollRef} style={{ overflow: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 1250, tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: canEdit ? '5%' : '0%' }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <SortTh sortKeyName="tanggal" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>Tanggal</SortTh>
+                <SortTh sortKeyName="line" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>
+                  <span title="Line Produksi">Line</span>
+                </SortTh>
+                <SortTh sortKeyName="partName" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>Part Name</SortTh>
+                <SortTh sortKeyName="problem" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>Problem</SortTh>
+                <SortTh sortKeyName="jenisProblem" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>Jenis Problem</SortTh>
+                <SortTh sortKeyName="totalLossTime" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>
+                  <span title="Total Loss Time (Loss Time + Breakdown Mesin)">Loss Time</span>
+                </SortTh>
+                <SortTh sortKeyName="dueDate" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>Due Date</SortTh>
+                <SortTh sortKeyName="permanentAction" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>
+                  <span title="Permanent Action">Action</span>
+                </SortTh>
+                <SortTh sortKeyName="notes" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>Notes</SortTh>
+                <SortTh sortKeyName="status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} style={thGrid}>Status</SortTh>
+                {canEdit && <th style={thGrid}>Aksi</th>}
               </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onPageChange={setPage} disabled={loading} />
+            </thead>
+            <tbody>
+              {loading && rows.length === 0 ? (
+                <tr><td colSpan={11} style={{ padding: '10px 16px' }}><Skeleton height={12} width="60%" /></td></tr>
+              ) : sortedShown.length === 0 ? (
+                <tr><td colSpan={11} style={{ padding: 24, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Belum ada data.</td></tr>
+              ) : sortedShown.map((r) => (
+                <tr key={r.id} onClick={() => setDetailRow(r)} style={{ cursor: 'pointer' }}>
+                  <td style={{ ...tdEllipsis, color: isOverdue(r) ? 'var(--red)' : 'var(--text)' }}>{formatDateID(r.tanggal)}</td>
+                  <td style={tdEllipsis} title={r.line || ''}>{r.line || '—'}</td>
+                  <td style={tdEllipsis} title={r.partName || ''}>{r.partName || '—'}</td>
+                  <td style={tdEllipsis} title={r.problem || ''}>{r.problem}</td>
+                  <td style={tdEllipsis} title={r.jenisProblem || ''}>{r.jenisProblem || '—'}</td>
+                  <td style={td}>{r.totalLossTime ? `${r.totalLossTime} menit` : '—'}</td>
+                  <td style={{ ...td, color: isOverdue(r) ? 'var(--red)' : 'var(--text)', fontWeight: isOverdue(r) ? 700 : 400 }}>
+                    {r.dueDate ? formatDateID(r.dueDate) : '—'}
+                  </td>
+                  <td style={tdEllipsis} title={r.permanentAction || ''}>{r.permanentAction || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
+                  <td style={tdEllipsis} title={r.notes || ''}>{r.notes || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
+                  <td style={{ ...td, padding: '6px 8px' }}>
+                    {canEdit ? (
+                      <select
+                        value={r.status}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setStatus(r, e.target.value)}
+                        className="pp-select"
+                        style={{
+                          color: STATUS_COLOR[r.status] || 'var(--muted)', borderColor: STATUS_COLOR[r.status] || 'var(--border)', fontWeight: 700,
+                          width: '100%', minWidth: 0, maxWidth: '100%', boxSizing: 'border-box', padding: '5px 6px',
+                        }}
+                      >
+                        {STATUS_OPTS.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                      </select>
+                    ) : (
+                      <span style={{ color: STATUS_COLOR[r.status] || 'var(--muted)', fontWeight: 700, whiteSpace: 'nowrap' }}>{STATUS_LABEL[r.status] || r.status}</span>
+                    )}
+                  </td>
+                  {canEdit && (
+                    <td style={td}>
+                      <RowActionsMenu onEdit={() => setEditRow(r)} onDelete={() => remove(r.id)} />
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {editRow && canEdit && (
@@ -364,6 +479,12 @@ export default function ProblemLogPage() {
 
 const td = { padding: '8px 10px', fontSize: 12.5, border: '1px solid var(--border)', color: 'var(--text)', whiteSpace: 'nowrap' };
 const tdEllipsis = { ...td, overflow: 'hidden', textOverflow: 'ellipsis' };
-const thGrid = { padding: '8px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', border: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap' };
+// overflow/textOverflow: header (SortTh) sebelumnya nowrap tanpa clip --
+// label panjang (mis. "Total Loss Time"/"Permanent Action") jadi
+// tumpang tindih visual ke kolom sebelahnya di lebar kolom sempit. Label
+// yang lebih panjang dari kolomnya sekarang dipotong "…" (bukan bocor ke
+// kolom lain) -- lihat juga pemendekan label di header tabel (mis. "Line
+// Produksi" -> "Line", title penuh lewat <span title>).
+const thGrid = { padding: '8px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', border: '1px solid var(--border)', textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 const iconBtn = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '5px 7px', fontSize: 12, cursor: 'pointer', color: 'var(--text)', whiteSpace: 'nowrap', flexShrink: 0 };
-const statusBtn = { background: 'none', border: '1px solid', borderRadius: 6, padding: '4px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' };
+const menuItem = { display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '9px 12px', fontSize: 12.5, background: 'none', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', color: 'var(--text)', textAlign: 'left', whiteSpace: 'nowrap' };

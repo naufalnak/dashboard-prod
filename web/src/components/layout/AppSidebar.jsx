@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, LayoutDashboard, Factory, Table2, ShieldAlert, Clock, Wrench, AlertTriangle, AlertOctagon, Database, ClipboardList } from 'lucide-react';
+import { ChevronLeft, ChevronRight, LayoutDashboard, Factory, Table2, ShieldAlert, Clock, Wrench, AlertTriangle, AlertOctagon, Database, ClipboardCheck, ClipboardList } from 'lucide-react';
 import { useUI } from '../../contexts/UIContext.jsx';
 import { useAuth } from '../../contexts/AuthContext.jsx';
 import { canSeeAllPages, canSeeMachinesPage, RESTRICTED_PAGES } from '../../roles.js';
@@ -14,6 +14,7 @@ const NAV_ICONS = {
   problemlog: AlertTriangle,
   downtimeproduksi: AlertOctagon,
   masterdata: Database,
+  datavalidasi: ClipboardCheck,
 };
 
 // Sidebar utama desktop -- rail ikon saja secara default (kolom sempit di
