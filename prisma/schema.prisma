@@ -37,6 +37,13 @@ model Admin {
   passwordHash String
   role         String   @default("maintenance") // maintenance | produksi
   createdAt    DateTime @default(now())
+  // Daftar app yang boleh diakses akun ini, mis. ["prod"], ["mtn"], atau
+  // ["prod","mtn"]. Dicek di route /login (auth.routes.js). Kolom ini
+  // ditambahkan lewat migration di project dashboard-mtn (yang memegang
+  // migration history untuk schema "shared" via multiSchema) -- jangan
+  // buat migration terpisah untuk kolom ini di project ini, cukup jalankan
+  // `prisma db pull` / `prisma generate` ulang di sini setelah kolomnya ada.
+  allowedApps  String[] @default(["prod", "mtn"])
 }
 
 // Master data relasional — dikelola lewat menu "Master Data" di dashboard
