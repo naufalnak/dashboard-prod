@@ -14,6 +14,15 @@ router.post('/produksi-harian', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── POST /api/produksi-harian-import ───────────────────
+// Login-gated — import massal RC Harian Produksi dari file Excel (baris
+// sudah di-parse jadi array objek di frontend), lihat Data Produksi.
+router.post('/produksi-harian-import', requireAuth, async (req, res, next) => {
+  try {
+    res.json(await produksiService.importProduksi(req.body.rows));
+  } catch (err) { next(err); }
+});
+
 // ── POST /api/produksi-harian-update ───────────────────
 // Login-gated — admin/Grup Head mengedit baris Resume Control Harian
 // Produksi yang sudah tersimpan. Path flat, id di body (lihat catatan

@@ -221,6 +221,57 @@ async function createProduksi(body) {
   return { id: primary.id, ids: records.map((r) => r.id), ...rowMetrics(primary) };
 }
 
+// ── POST /api/produksi-harian-import ────────────────────
+// Import massal RC Harian Produksi dari file Excel -- di-parse penuh di
+// FRONTEND (lihat web/src/importXlsx.js), dikirim sebagai array objek
+// biasa. Satu baris file = satu baris ProduksiHarian baru, SATU Mesin per
+// baris (tidak seperti form RC Harian yang bisa multi-Mesin sekaligus --
+// kalau perlu banyak Mesin utk Part Name+Proses yang sama, cukup ulang
+// baris file-nya beberapa kali dengan Mesin beda).
+//
+// Sengaja panggil createProduksi PER BARIS (bukan prisma.createMany
+// sekaligus seperti importProses di masterData.service.js) walau lebih
+// lambat -- createMany tidak mengembalikan baris yang baru dibuat
+// (butuh row.id buat syncLinkedProblemLog, lihat createProduksi), dan
+// tiap baris di sini juga perlu validasi downtime (assertJenisProblemIfDowntime)
+// yang sudah ada di createProduksi -- duplikasi logic itu di jalur bulk
+// lebih berisiko salah daripada lebih lambat sedikit. Wajar untuk skala
+// input harian (puluhan-ratusan baris), beda dengan importProses yang utk
+// migrasi katalog Part Name/Proses yang bisa ribuan baris sekaligus.
+async function importProduksi(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) throw httpError(400, 'Tidak ada baris untuk diimport');
+
+  const errors = [];
+  let imported = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] || {};
+    const tanggalRaw = r.tanggal;
+    const tanggal = tanggalRaw instanceof Date ? tanggalRaw.toISOString().slice(0, 10) : String(tanggalRaw || '').trim();
+    const body = {
+      tanggal, shift: String(r.shift || '').trim(), cluster: String(r.cluster || '').trim().toUpperCase(),
+      line: String(r.line || '').trim(), part_name: String(r.part_name || '').trim(), proses: String(r.proses || '').trim(),
+      mesin: String(r.mesin || '').trim(), no_lot: String(r.no_lot || '').trim() || undefined,
+      man_power: String(r.man_power || '').trim() || undefined,
+      cycle_time: r.cycle_time, waktu_efektif: r.waktu_efektif, plan: r.plan,
+      ok1: r.total_ok, rwk: r.rework, rjct: r.reject,
+      jenis_problem: String(r.jenis_problem || '').trim() || undefined,
+      lost_time: r.lost_time, breakdown_mesin: r.breakdown_mesin,
+      keterangan: String(r.keterangan || '').trim() || undefined,
+    };
+    if (!body.tanggal || isNaN(new Date(body.tanggal).getTime())) {
+      errors.push({ row: i + 2, reason: 'Tanggal wajib diisi dan valid (format YYYY-MM-DD)' });
+      continue;
+    }
+    try {
+      await createProduksi(body);
+      imported++;
+    } catch (e) {
+      errors.push({ row: i + 2, reason: e.message || 'Gagal menyimpan baris ini' });
+    }
+  }
+  return { imported, errors, total: rows.length };
+}
+
 // ── POST /api/produksi-harian-update ───────────────────
 // Login-gated — admin/Grup Head mengedit baris Resume Control Harian
 // Produksi yang sudah tersimpan (mis. salah input Plan/OK/Reject).
@@ -691,6 +742,7 @@ async function getOeeTrend(query) {
 
 module.exports = {
   createProduksi,
+  importProduksi,
   updateProduksi,
   deleteProduksi,
   listProduksi,

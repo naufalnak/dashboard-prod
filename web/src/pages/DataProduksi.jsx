@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, X, ArrowUpRight, Download } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { RefreshCw, X, ArrowUpRight, Download, Upload } from 'lucide-react';
 import ProduksiTable from '../components/ProduksiTable.jsx';
 import LineTrendChart from '../components/charts/LineTrendChart.jsx';
 import PeriodPicker from '../components/PeriodPicker.jsx';
@@ -12,6 +13,7 @@ import { useToast } from '../contexts/ToastContext.jsx';
 import { useConfirm } from '../contexts/ConfirmContext.jsx';
 import { isReadOnlyUser } from '../roles.js';
 import { downloadXlsx } from '../exportXlsx.js';
+import { readXlsxFile } from '../importXlsx.js';
 import { formatDateID } from '../dateFmt.js';
 
 const API = '/api';
@@ -393,6 +395,164 @@ function EditProduksiModal({ row, master, machines, onClose, onSaved }) {
   );
 }
 
+// Kolom yang dibaca fitur Import & template contohnya -- header di file
+// yang diupload dicocokkan ke label ini (case-insensitive, urutan kolom
+// bebas), lihat mapImportRow. Satu baris file = satu baris ProduksiHarian
+// baru dengan SATU Mesin (sama pola dengan Import Part Name & Proses di
+// Master Data) -- kalau satu Part Name+Proses+tanggal perlu beberapa
+// Mesin sekaligus, ulang saja baris filenya dengan Mesin yang beda.
+const IMPORT_COLUMNS = [
+  { key: 'tanggal', label: 'Tanggal' },
+  { key: 'shift', label: 'Shift' },
+  { key: 'cluster', label: 'Cluster' },
+  { key: 'line', label: 'Line Produksi' },
+  { key: 'part_name', label: 'Part Name' },
+  { key: 'proses', label: 'Proses' },
+  { key: 'mesin', label: 'Mesin' },
+  { key: 'no_lot', label: 'No Lot' },
+  { key: 'man_power', label: 'Man Power' },
+  { key: 'cycle_time', label: 'Cycle Time' },
+  { key: 'waktu_efektif', label: 'Waktu Efektif' },
+  { key: 'plan', label: 'Plan' },
+  { key: 'total_ok', label: 'Total OK' },
+  { key: 'rework', label: 'Rework' },
+  { key: 'reject', label: 'Reject' },
+  { key: 'jenis_problem', label: 'Jenis Problem' },
+  { key: 'lost_time', label: 'Loss Time' },
+  { key: 'breakdown_mesin', label: 'Breakdown Mesin' },
+  { key: 'keterangan', label: 'Keterangan' },
+];
+
+function mapImportRow(raw) {
+  const normalized = {};
+  for (const [k, v] of Object.entries(raw)) normalized[String(k).trim().toLowerCase()] = v;
+  const get = (label) => normalized[label.toLowerCase()];
+  return {
+    tanggal: get('Tanggal'),
+    shift: String(get('Shift') ?? '').trim(),
+    cluster: String(get('Cluster') ?? '').trim(),
+    line: String(get('Line Produksi') ?? '').trim(),
+    part_name: String(get('Part Name') ?? '').trim(),
+    proses: String(get('Proses') ?? '').trim(),
+    mesin: String(get('Mesin') ?? '').trim(),
+    no_lot: String(get('No Lot') ?? '').trim(),
+    man_power: String(get('Man Power') ?? '').trim(),
+    cycle_time: get('Cycle Time') ?? '',
+    waktu_efektif: get('Waktu Efektif') ?? '',
+    plan: get('Plan') ?? '',
+    total_ok: get('Total OK') ?? '',
+    rework: get('Rework') ?? '',
+    reject: get('Reject') ?? '',
+    jenis_problem: String(get('Jenis Problem') ?? '').trim(),
+    lost_time: get('Loss Time') ?? '',
+    breakdown_mesin: get('Breakdown Mesin') ?? '',
+    keterangan: String(get('Keterangan') ?? '').trim(),
+  };
+}
+
+// Import massal RC Harian Produksi dari file Excel -- di-parse penuh di
+// browser (lihat web/src/importXlsx.js), dikirim sebagai array biasa ke
+// /produksi-harian-import. Sama pola dengan ImportProsesModal di
+// PartProsesTab.jsx (Master Data).
+function ImportProduksiModal({ logout, onClose, onImported }) {
+  const showToast = useToast();
+  const [rows, setRows] = useState([]);
+  const [fileName, setFileName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+
+  function downloadTemplate() {
+    downloadXlsx('template-import-data-produksi.xlsx', 'Data Produksi', IMPORT_COLUMNS, [
+      {
+        tanggal: todayStr(), shift: 'Shift 1', cluster: 'AD', line: 'Suzuki', part_name: 'CONTOH PART NAME',
+        proses: 'Assy', mesin: 'ROBOT WELDING PANASONIC', no_lot: '', man_power: '', cycle_time: 30,
+        waktu_efektif: 7, plan: 800, total_ok: 750, rework: 20, reject: 5, jenis_problem: '', lost_time: 0,
+        breakdown_mesin: 0, keterangan: '',
+      },
+    ]);
+  }
+
+  async function handleFile(file) {
+    if (!file) return;
+    setFileName(file.name);
+    setResult(null);
+    try {
+      const raw = await readXlsxFile(file);
+      setRows(raw.map(mapImportRow).filter((r) => r.part_name || r.proses));
+    } catch (e) {
+      showToast('Gagal membaca file: ' + e.message, 'red');
+      setRows([]);
+    }
+  }
+
+  async function doImport() {
+    if (rows.length === 0) return;
+    setBusy(true);
+    try {
+      const r = await apiSend('/produksi-harian-import', 'POST', { rows }, logout);
+      setResult(r);
+      if (r.imported > 0) {
+        showToast(`${r.imported} baris berhasil diimport${r.errors.length ? `, ${r.errors.length} dilewati` : ''}`, r.errors.length ? 'yellow' : 'green');
+        onImported();
+      } else {
+        showToast('Tidak ada baris yang berhasil diimport, cek daftar error di bawah', 'red');
+      }
+    } catch (e) { showToast(e.message, 'red'); }
+    setBusy(false);
+  }
+
+  return createPortal(
+    <div className="overlay show" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 560, borderRadius: '14px 14px 0 0' }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">Import Data Produksi</div>
+          <button className="modal-close" onClick={onClose}><X size={20} /></button>
+        </div>
+
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
+          Kolom yang dibaca: <strong>Tanggal, Shift, Cluster, Line Produksi, Part Name, Proses, Mesin</strong> (wajib diisi), plus No Lot/Man Power/Cycle Time/Waktu Efektif/Plan/Total OK/Rework/Reject/Jenis Problem/Loss Time/Breakdown Mesin/Keterangan (opsional). Tanggal format <strong>YYYY-MM-DD</strong> atau sel bertipe Tanggal di Excel. Satu baris file = satu baris data dengan satu Mesin — kalau satu Part Name+Proses perlu beberapa Mesin, ulang barisnya dengan Mesin berbeda.
+        </div>
+
+        <button className="btn" onClick={downloadTemplate} style={{ marginBottom: 12 }}>Download Template</button>
+
+        <input
+          type="file" accept=".xlsx,.xls"
+          style={{ display: 'block', marginBottom: 12, fontSize: 12.5, color: 'var(--text)' }}
+          onChange={(e) => handleFile(e.target.files[0])}
+        />
+
+        {rows.length > 0 && !result && (
+          <div style={{ fontSize: 12.5, marginBottom: 12 }}>
+            <strong>{fileName}</strong> — {rows.length} baris terbaca.
+          </div>
+        )}
+
+        {result && (
+          <div style={{ fontSize: 12, marginBottom: 12, maxHeight: 220, overflowY: 'auto', background: 'var(--s2)', borderRadius: 8, padding: 10 }}>
+            <div style={{ color: 'var(--green)', fontWeight: 700 }}>{result.imported} dari {result.total} baris berhasil diimport.</div>
+            {result.errors.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <div style={{ color: 'var(--red)', fontWeight: 700 }}>{result.errors.length} baris dilewati:</div>
+                {result.errors.map((e, i) => (
+                  <div key={i} style={{ color: 'var(--muted)' }}>Baris {e.row}: {e.reason}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="modal-footer">
+          <button className="btn primary" disabled={rows.length === 0 || busy} onClick={doImport}>
+            {busy ? 'Mengimport…' : `Import${rows.length ? ` (${rows.length} baris)` : ''}`}
+          </button>
+          <button className="btn" onClick={onClose}>Tutup</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export default function DataProduksi() {
   const { logout, username } = useAuth();
   const readOnly = isReadOnlyUser(username);
@@ -402,6 +562,7 @@ export default function DataProduksi() {
   const [period, setPeriod]   = useState('today');
   const [refDate, setRefDate] = useState(todayStr());
   const [query, setQuery]     = useState('');
+  const [showImport, setShowImport] = useState(false);
 
   // Datang dari link "Ke Data Produksi" di panel Master Data (Part Name
   // bermasalah) -- isi kotak pencarian & tampilkan semua periode (bukan
@@ -556,8 +717,17 @@ export default function DataProduksi() {
           <button className="btn" onClick={handleExport} disabled={filteredRows.length === 0} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Download size={14} /> Download Excel
           </button>
+          {!readOnly && (
+            <button className="btn" onClick={() => setShowImport(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Upload size={14} /> Upload Excel
+            </button>
+          )}
         </div>
       </div>
+
+      {showImport && (
+        <ImportProduksiModal logout={logout} onClose={() => setShowImport(false)} onImported={load} />
+      )}
 
       {CLUSTERS.filter((c) => clusterFilter === 'all' || c === clusterFilter).map((cluster) => (
         <div key={cluster} style={{ marginBottom: 24 }}>
