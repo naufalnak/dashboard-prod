@@ -400,14 +400,18 @@ function EditProduksiModal({ row, master, machines, onClose, onSaved }) {
 // bebas), lihat mapImportRow. LABEL-LABEL INI SENGAJA SAMA PERSIS dengan
 // kolom Download Excel (lihat handleExport di bawah) -- supaya file yang
 // baru saja di-Download bisa langsung diupload lagi tanpa perlu
-// mengedit/mengganti nama header dulu. totalProses/AR/AVB/PERF/YIELD/OEE
-// di file Download itu kolom HASIL HITUNGAN (bukan input produksi),
-// jadi sengaja TIDAK ada di sini -- kalau ikut terbawa di file yang
-// diupload, cukup diabaikan (mapImportRow cuma mengambil kolom yang
-// dikenalinya). Satu baris file = satu baris ProduksiHarian baru dengan
-// SATU Mesin (sama pola dengan Import Part Name & Proses di Master
-// Data) -- kalau satu Part Name+Proses+tanggal perlu beberapa Mesin
-// sekaligus, ulang saja baris filenya dengan Mesin yang beda.
+// mengedit/mengganti nama header dulu. AR/AVB/PERF/YIELD/OEE ikut
+// ditampilkan di sini/template supaya susunan kolomnya kelihatan identik
+// dengan Download, tapi ini kolom HASIL HITUNGAN (bukan input produksi)
+// -- mapImportRow TIDAK mengambil nilainya sama sekali, dihitung ulang
+// server dari Total OK/Rework/Reject dkk saat baris disimpan. totalProses
+// (juga hasil hitungan) malah tidak usah ada di sini -- kalau ikut
+// terbawa di file yang diupload (bekas Download, tidak dihapus), sama
+// saja diabaikan lewat mekanisme yang sama. Satu baris file = satu baris
+// ProduksiHarian baru dengan SATU Mesin (sama pola dengan Import Part
+// Name & Proses di Master Data) -- kalau satu Part Name+Proses+tanggal
+// perlu beberapa Mesin sekaligus, ulang saja baris filenya dengan Mesin
+// yang beda.
 const IMPORT_COLUMNS = [
   { key: 'tanggal', label: 'Tanggal' },
   { key: 'cluster', label: 'Cluster' },
@@ -428,6 +432,11 @@ const IMPORT_COLUMNS = [
   { key: 'jenis_problem', label: 'Jenis Problem' },
   { key: 'lost_time', label: 'Lost Time' },
   { key: 'keterangan', label: 'Keterangan' },
+  { key: 'ar', label: 'AR (%)' },
+  { key: 'avb', label: 'AVB (%)' },
+  { key: 'perf', label: 'PERF (%)' },
+  { key: 'yield', label: 'YIELD (%)' },
+  { key: 'oee', label: 'OEE (%)' },
 ];
 
 // Kolom hasil hitungan di file Download (bukan input) -- kalau file yang
@@ -449,16 +458,16 @@ function mapImportRow(raw) {
     proses: String(get('Proses') ?? '').trim(),
     mesin: String(get('Mesin') ?? '').trim(),
     no_lot: String(get('No Lot') ?? '').trim(),
-    man_power: String(get('MP') ?? '').trim(),
-    cycle_time: get('CT') ?? '',
+    man_power: String(get('Man Power') ?? '').trim(),
+    cycle_time: get('Cycle Time') ?? '',
     waktu_efektif: get('Waktu Efektif (Jam)') ?? '',
     plan: get('Plan') ?? '',
     total_ok: get('Total OK') ?? '',
-    rework: get('Rwk') ?? '',
-    reject: get('Rjct') ?? '',
+    rework: get('Rework') ?? '',
+    reject: get('Reject') ?? '',
     jenis_problem: String(get('Jenis Problem') ?? '').trim(),
     lost_time: get('Lost Time') ?? '',
-    breakdown_mesin: get('Breakdown MC') ?? '',
+    breakdown_mesin: get('Breakdown Mesin') ?? '',
     keterangan: String(get('Keterangan') ?? '').trim(),
   };
 }
@@ -481,6 +490,11 @@ function ImportProduksiModal({ logout, onClose, onImported }) {
         proses: 'Assy', mesin: 'ROBOT WELDING PANASONIC', no_lot: '', man_power: '', cycle_time: 30,
         waktu_efektif: 7, plan: 800, total_ok: 750, rework: 20, reject: 5, jenis_problem: '', lost_time: 0,
         breakdown_mesin: 0, keterangan: '',
+        // Kolom hasil hitungan (sama seperti file Download Excel) --
+        // diisi "(otomatis)" di baris contoh supaya jelas TIDAK perlu
+        // diisi manual, dihitung ulang server dari Total OK/Rework/
+        // Reject dkk saat baris disimpan.
+        ar: '(otomatis)', avb: '(otomatis)', perf: '(otomatis)', yield: '(otomatis)', oee: '(otomatis)',
       },
     ]);
   }
@@ -523,7 +537,7 @@ function ImportProduksiModal({ logout, onClose, onImported }) {
         </div>
 
         <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
-          Kolom sama persis dengan file <strong>Download Excel</strong> -- file yang baru di-Download bisa langsung diupload lagi di sini tanpa perlu ganti nama kolom. Kolom yang dibaca: <strong>Tanggal, Cluster, Shift, Nama Parts, Proses, Line Produksi, Mesin</strong> (wajib diisi), plus No Lot/MP/CT/Waktu Efektif (Jam)/Plan/Rwk/Rjct/Total OK/Breakdown MC/Jenis Problem/Lost Time/Keterangan (opsional). Kolom hasil hitungan di file Download ({IMPORT_IGNORED_COMPUTED_LABELS.join(', ')}) boleh ikut terbawa, otomatis diabaikan. Tanggal boleh format <strong>DD/MM/YYYY</strong> (seperti hasil Download), <strong>YYYY-MM-DD</strong>, atau sel bertipe Tanggal di Excel. Satu baris file = satu baris data dengan satu Mesin — kalau satu Part Name+Proses perlu beberapa Mesin, ulang barisnya dengan Mesin berbeda.
+          Kolom sama persis dengan file <strong>Download Excel</strong> -- file yang baru di-Download bisa langsung diupload lagi di sini tanpa perlu ganti nama kolom. Kolom yang dibaca: <strong>Tanggal, Cluster, Shift, Nama Parts, Proses, Line Produksi, Mesin</strong> (wajib diisi), plus No Lot/Man Power/Cycle Time/Waktu Efektif (Jam)/Plan/Rework/Reject/Total OK/Breakdown Mesin/Jenis Problem/Lost Time/Keterangan (opsional). Kolom hasil hitungan ({IMPORT_IGNORED_COMPUTED_LABELS.join(', ')}) boleh ikut terbawa, otomatis diabaikan. Tanggal boleh format <strong>DD/MM/YYYY</strong> (seperti hasil Download), <strong>YYYY-MM-DD</strong>, atau sel bertipe Tanggal di Excel. Satu baris file = satu baris data dengan satu Mesin — kalau satu Part Name+Proses perlu beberapa Mesin, ulang barisnya dengan Mesin berbeda.
         </div>
 
         <button className="btn" onClick={downloadTemplate} style={{ marginBottom: 12 }}>Download Template</button>
@@ -661,15 +675,15 @@ export default function DataProduksi() {
       { key: 'proses', label: 'Proses' },
       { key: 'line', label: 'Line Produksi' },
       { key: 'mesin', label: 'Mesin' },
-      { key: 'manPower', label: 'MP' },
-      { key: 'cycleTime', label: 'CT' },
+      { key: 'manPower', label: 'Man Power' },
+      { key: 'cycleTime', label: 'Cycle Time' },
       { key: 'waktuEfektif', label: 'Waktu Efektif (Jam)' },
       { key: 'plan', label: 'Plan' },
-      { key: 'rework', label: 'Rwk' },
-      { key: 'reject', label: 'Rjct' },
+      { key: 'rework', label: 'Rework' },
+      { key: 'reject', label: 'Reject' },
       { key: 'totalOk', label: 'Total OK' },
       { key: 'totalProses', label: 'Total Proses' },
-      { key: 'breakdownMesin', label: 'Breakdown MC' },
+      { key: 'breakdownMesin', label: 'Breakdown Mesin' },
       { key: 'jenisProblem', label: 'Jenis Problem' },
       { key: 'lostTime', label: 'Lost Time' },
       { key: 'keterangan', label: 'Keterangan' },
