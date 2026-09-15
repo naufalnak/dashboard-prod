@@ -238,6 +238,26 @@ async function createProduksi(body) {
 // lebih berisiko salah daripada lebih lambat sedikit. Wajar untuk skala
 // input harian (puluhan-ratusan baris), beda dengan importProses yang utk
 // migrasi katalog Part Name/Proses yang bisa ribuan baris sekaligus.
+// Tanggal di file yang diupload bisa dari 3 sumber berbeda: sel bertipe
+// Tanggal asli di Excel (jadi objek Date di frontend, tapi berubah jadi
+// string ISO begitu lewat JSON.stringify ke sini -- jadi `instanceof Date`
+// TIDAK PERNAH true di server, sudah pasti string), diketik manual sebagai
+// teks ISO "YYYY-MM-DD", ATAU -- ini yang penting -- hasil Download Excel
+// (kolom Tanggal-nya sengaja ditulis "DD/MM/YYYY" oleh formatDateID, lihat
+// DataProduksi.jsx) yang diupload lagi apa adanya. `new Date("15/09/2026")`
+// diartikan JS sebagai MM/DD (bulan 15 tidak valid) -- jadi format
+// DD/MM/YYYY ini WAJIB ditangani manual di sini, bukan diserahkan ke
+// `new Date()` begitu saja.
+function parseImportTanggal(raw) {
+  const s = String(raw || '').trim();
+  const dmy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+  if (dmy) {
+    const [, d, m, y] = dmy;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  return s.slice(0, 10);
+}
+
 async function importProduksi(rows) {
   if (!Array.isArray(rows) || rows.length === 0) throw httpError(400, 'Tidak ada baris untuk diimport');
 
@@ -245,8 +265,7 @@ async function importProduksi(rows) {
   let imported = 0;
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i] || {};
-    const tanggalRaw = r.tanggal;
-    const tanggal = tanggalRaw instanceof Date ? tanggalRaw.toISOString().slice(0, 10) : String(tanggalRaw || '').trim();
+    const tanggal = parseImportTanggal(r.tanggal);
     const body = {
       tanggal, shift: String(r.shift || '').trim(), cluster: String(r.cluster || '').trim().toUpperCase(),
       line: String(r.line || '').trim(), part_name: String(r.part_name || '').trim(), proses: String(r.proses || '').trim(),
@@ -259,7 +278,7 @@ async function importProduksi(rows) {
       keterangan: String(r.keterangan || '').trim() || undefined,
     };
     if (!body.tanggal || isNaN(new Date(body.tanggal).getTime())) {
-      errors.push({ row: i + 2, reason: 'Tanggal wajib diisi dan valid (format YYYY-MM-DD)' });
+      errors.push({ row: i + 2, reason: 'Tanggal wajib diisi dan valid (format DD/MM/YYYY atau YYYY-MM-DD)' });
       continue;
     }
     try {

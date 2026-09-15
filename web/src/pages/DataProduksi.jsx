@@ -397,31 +397,44 @@ function EditProduksiModal({ row, master, machines, onClose, onSaved }) {
 
 // Kolom yang dibaca fitur Import & template contohnya -- header di file
 // yang diupload dicocokkan ke label ini (case-insensitive, urutan kolom
-// bebas), lihat mapImportRow. Satu baris file = satu baris ProduksiHarian
-// baru dengan SATU Mesin (sama pola dengan Import Part Name & Proses di
-// Master Data) -- kalau satu Part Name+Proses+tanggal perlu beberapa
-// Mesin sekaligus, ulang saja baris filenya dengan Mesin yang beda.
+// bebas), lihat mapImportRow. LABEL-LABEL INI SENGAJA SAMA PERSIS dengan
+// kolom Download Excel (lihat handleExport di bawah) -- supaya file yang
+// baru saja di-Download bisa langsung diupload lagi tanpa perlu
+// mengedit/mengganti nama header dulu. totalProses/AR/AVB/PERF/YIELD/OEE
+// di file Download itu kolom HASIL HITUNGAN (bukan input produksi),
+// jadi sengaja TIDAK ada di sini -- kalau ikut terbawa di file yang
+// diupload, cukup diabaikan (mapImportRow cuma mengambil kolom yang
+// dikenalinya). Satu baris file = satu baris ProduksiHarian baru dengan
+// SATU Mesin (sama pola dengan Import Part Name & Proses di Master
+// Data) -- kalau satu Part Name+Proses+tanggal perlu beberapa Mesin
+// sekaligus, ulang saja baris filenya dengan Mesin yang beda.
 const IMPORT_COLUMNS = [
   { key: 'tanggal', label: 'Tanggal' },
-  { key: 'shift', label: 'Shift' },
   { key: 'cluster', label: 'Cluster' },
-  { key: 'line', label: 'Line Produksi' },
-  { key: 'part_name', label: 'Part Name' },
-  { key: 'proses', label: 'Proses' },
-  { key: 'mesin', label: 'Mesin' },
+  { key: 'shift', label: 'Shift' },
+  { key: 'part_name', label: 'Nama Parts' },
   { key: 'no_lot', label: 'No Lot' },
+  { key: 'proses', label: 'Proses' },
+  { key: 'line', label: 'Line Produksi' },
+  { key: 'mesin', label: 'Mesin' },
   { key: 'man_power', label: 'Man Power' },
   { key: 'cycle_time', label: 'Cycle Time' },
-  { key: 'waktu_efektif', label: 'Waktu Efektif' },
+  { key: 'waktu_efektif', label: 'Waktu Efektif (Jam)' },
   { key: 'plan', label: 'Plan' },
-  { key: 'total_ok', label: 'Total OK' },
   { key: 'rework', label: 'Rework' },
   { key: 'reject', label: 'Reject' },
-  { key: 'jenis_problem', label: 'Jenis Problem' },
-  { key: 'lost_time', label: 'Loss Time' },
+  { key: 'total_ok', label: 'Total OK' },
   { key: 'breakdown_mesin', label: 'Breakdown Mesin' },
+  { key: 'jenis_problem', label: 'Jenis Problem' },
+  { key: 'lost_time', label: 'Lost Time' },
   { key: 'keterangan', label: 'Keterangan' },
 ];
+
+// Kolom hasil hitungan di file Download (bukan input) -- kalau file yang
+// diupload masih membawa kolom-kolom ini apa adanya (bekas Download,
+// tidak diedit), diamkan saja, jangan dianggap header yang tidak
+// dikenal/error.
+const IMPORT_IGNORED_COMPUTED_LABELS = ['Total Proses', 'AR (%)', 'AVB (%)', 'PERF (%)', 'YIELD (%)', 'OEE (%)'];
 
 function mapImportRow(raw) {
   const normalized = {};
@@ -432,20 +445,20 @@ function mapImportRow(raw) {
     shift: String(get('Shift') ?? '').trim(),
     cluster: String(get('Cluster') ?? '').trim(),
     line: String(get('Line Produksi') ?? '').trim(),
-    part_name: String(get('Part Name') ?? '').trim(),
+    part_name: String(get('Nama Parts') ?? '').trim(),
     proses: String(get('Proses') ?? '').trim(),
     mesin: String(get('Mesin') ?? '').trim(),
     no_lot: String(get('No Lot') ?? '').trim(),
-    man_power: String(get('Man Power') ?? '').trim(),
-    cycle_time: get('Cycle Time') ?? '',
-    waktu_efektif: get('Waktu Efektif') ?? '',
+    man_power: String(get('MP') ?? '').trim(),
+    cycle_time: get('CT') ?? '',
+    waktu_efektif: get('Waktu Efektif (Jam)') ?? '',
     plan: get('Plan') ?? '',
     total_ok: get('Total OK') ?? '',
-    rework: get('Rework') ?? '',
-    reject: get('Reject') ?? '',
+    rework: get('Rwk') ?? '',
+    reject: get('Rjct') ?? '',
     jenis_problem: String(get('Jenis Problem') ?? '').trim(),
-    lost_time: get('Loss Time') ?? '',
-    breakdown_mesin: get('Breakdown Mesin') ?? '',
+    lost_time: get('Lost Time') ?? '',
+    breakdown_mesin: get('Breakdown MC') ?? '',
     keterangan: String(get('Keterangan') ?? '').trim(),
   };
 }
@@ -510,7 +523,7 @@ function ImportProduksiModal({ logout, onClose, onImported }) {
         </div>
 
         <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
-          Kolom yang dibaca: <strong>Tanggal, Shift, Cluster, Line Produksi, Part Name, Proses, Mesin</strong> (wajib diisi), plus No Lot/Man Power/Cycle Time/Waktu Efektif/Plan/Total OK/Rework/Reject/Jenis Problem/Loss Time/Breakdown Mesin/Keterangan (opsional). Tanggal format <strong>YYYY-MM-DD</strong> atau sel bertipe Tanggal di Excel. Satu baris file = satu baris data dengan satu Mesin — kalau satu Part Name+Proses perlu beberapa Mesin, ulang barisnya dengan Mesin berbeda.
+          Kolom sama persis dengan file <strong>Download Excel</strong> -- file yang baru di-Download bisa langsung diupload lagi di sini tanpa perlu ganti nama kolom. Kolom yang dibaca: <strong>Tanggal, Cluster, Shift, Nama Parts, Proses, Line Produksi, Mesin</strong> (wajib diisi), plus No Lot/MP/CT/Waktu Efektif (Jam)/Plan/Rwk/Rjct/Total OK/Breakdown MC/Jenis Problem/Lost Time/Keterangan (opsional). Kolom hasil hitungan di file Download ({IMPORT_IGNORED_COMPUTED_LABELS.join(', ')}) boleh ikut terbawa, otomatis diabaikan. Tanggal boleh format <strong>DD/MM/YYYY</strong> (seperti hasil Download), <strong>YYYY-MM-DD</strong>, atau sel bertipe Tanggal di Excel. Satu baris file = satu baris data dengan satu Mesin — kalau satu Part Name+Proses perlu beberapa Mesin, ulang barisnya dengan Mesin berbeda.
         </div>
 
         <button className="btn" onClick={downloadTemplate} style={{ marginBottom: 12 }}>Download Template</button>
@@ -631,6 +644,13 @@ export default function DataProduksi() {
   // yang lagi kefilter di layar (period/shift/pencarian), digabung semua
   // Cluster jadi satu file, buat dibaca/dianalisa lebih leluasa di luar
   // tabel yang tampilannya padat.
+  // Label kolom & urutan di sini SENGAJA disamakan persis dengan
+  // IMPORT_COLUMNS/mapImportRow di bawah (Upload Excel) -- supaya file
+  // hasil Download ini bisa langsung diupload ulang lewat Upload Excel
+  // tanpa perlu ganti nama header dulu. totalProses/ar/avb/perf/yield/oee
+  // itu kolom HASIL HITUNGAN (bukan input) -- tetap diekspor buat dibaca,
+  // tapi diabaikan begitu saja kalau file ini diupload lagi (lihat
+  // mapImportRow, cuma mengambil key yang dikenalinya).
   function handleExport() {
     const columns = [
       { key: 'tanggal', label: 'Tanggal' },
@@ -650,6 +670,7 @@ export default function DataProduksi() {
       { key: 'totalOk', label: 'Total OK' },
       { key: 'totalProses', label: 'Total Proses' },
       { key: 'breakdownMesin', label: 'Breakdown MC' },
+      { key: 'jenisProblem', label: 'Jenis Problem' },
       { key: 'lostTime', label: 'Lost Time' },
       { key: 'keterangan', label: 'Keterangan' },
       { key: 'ar', label: 'AR (%)' },
