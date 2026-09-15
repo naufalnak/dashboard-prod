@@ -9,7 +9,11 @@ export function readXlsxFile(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const workbook = XLSX.read(e.target.result, { type: 'array' });
+        // cellDates:true -- sel berformat Tanggal di Excel jadi objek Date
+        // JS asli (bukan angka serial Excel), dipakai fitur Import Data
+        // Produksi yang punya kolom Tanggal. Import lain yang tidak punya
+        // kolom Tanggal (mis. Part Name & Proses) tidak terpengaruh.
+        const workbook = XLSX.read(e.target.result, { type: 'array', cellDates: true });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         resolve(XLSX.utils.sheet_to_json(sheet, { defval: '' }));
       } catch (err) { reject(err); }
