@@ -13,8 +13,12 @@ import SortTh from '../components/SortTh.jsx';
 import { SkeletonCircle, SkeletonBlock, SkeletonRows } from '../components/Skeleton.jsx';
 import { useSort } from '../useSort.js';
 
-const MAIN_SIZE = 200;
-const MINI_SIZE = 62;
+// Diperkecil dari 200/62 -- sama pola dengan ARDetail.jsx: kartu OEE &
+// Breakdown OEE sekarang disamakan tinggi alaminya dengan "5 Line
+// Produksi OEE Tertinggi" (lihat baris row4 di bawah), donut yang lebih
+// kecil ini muat tanpa bikin kartunya jadi lebih tinggi dari yang dituju.
+const MAIN_SIZE = 150;
+const MINI_SIZE = 48;
 const OEE_OK_THRESHOLD = 85; // di bawah ini ring diwarnai merah, sama pola dengan AR_OK_THRESHOLD di ARDetail
 const CLUSTERS = ['AD', 'BC', 'EF', 'FI'];
 
@@ -122,7 +126,11 @@ export default function OEEDetail() {
         </div>
       </div>
 
-      <div className="row4" style={{ gridTemplateColumns: '0.95fr 0.95fr 1.3fr', marginBottom: 16, alignItems: 'stretch' }}>
+      {/* OEE & Breakdown OEE -- dipisah dari Tren OEE (dulu satu baris
+          bertiga dengan alignItems:'stretch'), disamakan tinggi alaminya
+          dengan "5 Line Produksi OEE Tertinggi" di baris bawah, sama
+          pola dengan ARDetail.jsx. */}
+      <div className="row4" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 16, alignItems: 'stretch' }}>
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-header"><div className="card-title">OEE {clusterLabel}</div></div>
           {loading ? (
@@ -164,6 +172,12 @@ export default function OEEDetail() {
           )}
         </div>
 
+      </div>
+
+      {/* Tren OEE -- baris sendiri, lebar penuh, sama pola dengan
+          ARDetail.jsx (blok grafik lebih lega + label nilai per bar dapat
+          ruang cukup). */}
+      <div className="row4" style={{ gridTemplateColumns: '1fr', marginBottom: 16 }}>
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-header">
             <div className="card-title">Tren OEE {clusterLabel}</div>

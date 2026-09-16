@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Minimize2 } from 'lucide-react';
+import { Minimize2, Plus } from 'lucide-react';
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
 import { ThemeProvider } from './contexts/ThemeContext.jsx';
 import { ToastProvider } from './contexts/ToastContext.jsx';
@@ -72,10 +72,17 @@ function Shell() {
       <WOPanel />
       <ModalRoot />
       <TargetsModal />
-      {presentMode && (
+      {presentMode ? (
         <button className="pres-fab" onClick={togglePresentMode} title="Keluar mode layar penuh">
           <Minimize2 size={14} /> Keluar
         </button>
+      ) : (
+        <a
+          className="lhp-fab" href="/lhp" target="_blank" rel="noopener noreferrer"
+          title="Input Laporan Hasil Produksi (RC Harian Produksi)"
+        >
+          <Plus size={20} /> <span>Input LHP</span>
+        </a>
       )}
     </>
   );

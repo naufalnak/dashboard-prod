@@ -13,6 +13,7 @@ const { isPrivilegedUsername } = require('../lib/auth');
 const {
   rowMetrics, aggregateOee, avgArValues, pct, resolveTotalOkFromProduksi, sumOvertimeTargetHours,
 } = require('./produksiMetrics.service');
+const { resyncRejectionTotalOk } = require('./rejection.service');
 
 function httpError(status, message) {
   const err = new Error(message);
@@ -218,6 +219,11 @@ async function createProduksi(body) {
   }
 
   const primary = records.find((r) => r.mesin === problem_mesin) || records[0];
+  // Baris Input Rejection Part Name+tanggal yang sama mungkin sudah lebih
+  // dulu ada (dicatat sebelum RC Harian Produksi-nya sendiri diinput) --
+  // sinkron ulang Total OK-nya sekarang data produksinya baru masuk. Lihat
+  // catatan lengkap di resyncRejectionTotalOk (rejection.service.js).
+  await resyncRejectionTotalOk(primary.partName, primary.tanggal);
   return { id: primary.id, ids: records.map((r) => r.id), ...rowMetrics(primary) };
 }
 
@@ -430,6 +436,17 @@ async function updateProduksi(id, body, username) {
     }
   }
 
+  // Sinkron ulang Total OK Input Rejection utk Part Name+tanggal baris ini
+  // -- baik yang BARU (kalau nilainya baru saja berubah lewat edit ini)
+  // MAUPUN yang LAMA (kalau Part Name/tanggal baris ini dipindah, Total OK
+  // Rejection yang tadinya ikut menghitung baris ini perlu turun lagi
+  // tanpa baris ini). Lihat catatan lengkap di resyncRejectionTotalOk.
+  await resyncRejectionTotalOk(record.partName, record.tanggal);
+  if (record.partName.toLowerCase().trim() !== existing.partName.toLowerCase().trim()
+    || record.tanggal.getTime() !== existing.tanggal.getTime()) {
+    await resyncRejectionTotalOk(existing.partName, existing.tanggal);
+  }
+
   return { id: record.id, clonedIds, ...rowMetrics(record) };
 }
 
@@ -439,6 +456,9 @@ async function deleteProduksi(id, username) {
   if (!existing) throw httpError(404, 'Data tidak ditemukan');
   await assertClusterAccess(username, existing.cluster);
   await prisma.produksiHarian.delete({ where: { id } });
+  // Baris ini mungkin ikut menyumbang Total OK Input Rejection untuk Part
+  // Name+tanggal yang sama -- sinkron ulang sekarang baris ini hilang.
+  await resyncRejectionTotalOk(existing.partName, existing.tanggal);
 }
 
 // ── GET /api/produksi-harian ───────────────────────────

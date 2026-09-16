@@ -117,7 +117,11 @@ export default function OvertimeDetail() {
         </div>
       </div>
 
-      <div className="row4" style={{ gridTemplateColumns: '0.95fr 0.95fr 1.3fr', marginBottom: 16, alignItems: 'stretch' }}>
+      {/* Overtime & Overtime per Grup Head -- dipisah dari Tren Overtime
+          (dulu satu baris bertiga dengan alignItems:'stretch'), sama pola
+          dengan ARDetail.jsx supaya kartunya tidak ikut diregangkan
+          setinggi grafik tren yang sekarang sengaja dibuat lebih lega. */}
+      <div className="row4" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 16, alignItems: 'stretch' }}>
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-header"><div className="card-title">Overtime {clusterLabel}</div></div>
           {loading ? (
@@ -137,15 +141,20 @@ export default function OvertimeDetail() {
           <div className="card-header"><div className="card-title">Overtime per Grup Head {clusterLabel}</div></div>
           {loading ? (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <SkeletonCircle size={200} />
+              <SkeletonCircle size={150} />
             </div>
           ) : (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <KriteriaNgChart data={byGroupHead} mainSize={200} miniSize={62} />
+              <KriteriaNgChart data={byGroupHead} mainSize={150} miniSize={48} />
             </div>
           )}
         </div>
+      </div>
 
+      {/* Tren Overtime -- baris sendiri, lebar penuh, sama pola dengan
+          ARDetail.jsx (blok grafik lebih lega + label nilai per bar dapat
+          ruang cukup). */}
+      <div className="row4" style={{ gridTemplateColumns: '1fr', marginBottom: 16 }}>
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-header">
             <div className="card-title">Tren Overtime {clusterLabel}</div>

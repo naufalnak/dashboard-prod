@@ -10,6 +10,10 @@ function tickLabel() {
   return formatDateTimeID(new Date());
 }
 
+// "Resume Control Harian Produksi" (/lhp) dulu ada di sini sebagai item
+// menu biasa -- dipindah jadi tombol melayang (lihat .lhp-fab di App.jsx/
+// index.css) supaya selalu kelihatan & gampang dijangkau dari halaman
+// mana pun, tidak numpang di rail sidebar bareng menu admin lain.
 export const NAV_ITEMS = [
   { page: 'dashboard',     label: 'Dashboard' },
   { page: 'machines',      label: 'Semua Mesin' },
@@ -21,7 +25,6 @@ export const NAV_ITEMS = [
   { page: 'downtimeproduksi', label: 'Downtime Produksi' },
   { page: 'masterdata',    label: 'Master Data' },
   { page: 'datavalidasi',  label: 'Validasi Data' },
-  { href: '/lhp',          label: 'Resume Control Harian Produksi' },
 ];
 
 export default function Topbar() {

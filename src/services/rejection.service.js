@@ -116,6 +116,31 @@ async function deleteRejection(id) {
   await prisma.rejectionEntry.delete({ where: { id } });
 }
 
+// Sinkron ulang Total OK semua RejectionEntry yang Part Name+tanggal-nya
+// cocok dengan satu baris ProduksiHarian yang baru dibuat/diedit/dihapus
+// -- dipanggil dari produksi.service.js (createProduksi/updateProduksi/
+// deleteProduksi), BUKAN dari sini. Alasannya: Total OK Input Rejection
+// sebelumnya cuma dihitung SEKALI (lihat resolveTotalOkFromProduksi) saat
+// baris Rejection itu sendiri dibuat/diedit -- kalau baris RC Harian
+// Produksi untuk Part Name+tanggal yang sama baru diinput/dikoreksi
+// BELAKANGAN (urutan yang lumrah di lapangan: rejection dicatat duluan,
+// produksinya baru diinput shift berikutnya, atau baris produksinya
+// dikoreksi admin setelah rejection sudah ada), Total OK Input Rejection
+// itu nyangkut selamanya di angka lama (sering 0) sampai baris Rejection-
+// nya sendiri kebetulan diedit ulang. Fungsi ini menutup celah itu --
+// tidak melakukan apa-apa (query kosong, murah) kalau memang tidak ada
+// baris Rejection untuk Part Name+tanggal itu.
+async function resyncRejectionTotalOk(partName, tanggalDate) {
+  if (!partName || !tanggalDate || isNaN(tanggalDate.getTime())) return;
+  const dayStart = new Date(tanggalDate.getFullYear(), tanggalDate.getMonth(), tanggalDate.getDate());
+  const dayEnd = new Date(tanggalDate.getFullYear(), tanggalDate.getMonth(), tanggalDate.getDate(), 23, 59, 59, 999);
+  const matchWhere = { partName: { equals: partName, mode: 'insensitive' }, tanggal: { gte: dayStart, lte: dayEnd } };
+  const hasEntries = await prisma.rejectionEntry.count({ where: matchWhere });
+  if (hasEntries === 0) return;
+  const { totalOk } = await resolveTotalOkFromProduksi(partName, tanggalDate);
+  await prisma.rejectionEntry.updateMany({ where: matchWhere, data: { totalOk } });
+}
+
 // Reject Ratio rata-rata (Total LMR ÷ Total OK) per Cluster dalam periode
 // terpilih -- untuk halaman detail Rejection.
 async function getRejectionByCluster(query) {
@@ -204,4 +229,5 @@ module.exports = {
   getRejectionByPartName,
   getKriteriaNgStats,
   getRejectionTrend,
+  resyncRejectionTotalOk,
 };

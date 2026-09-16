@@ -16,10 +16,12 @@ function MiniDot({ label, pct, size, color }) {
   const r = size / 2 - 2;
   const cx = size / 2, cy = size / 2;
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <circle cx={cx} cy={cy} r={r} fill={color} />
-      </svg>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+      <div style={{ width: size, maxWidth: size, aspectRatio: '1', flexShrink: 0 }}>
+        <svg width="100%" height="100%" viewBox={`0 0 ${size} ${size}`}>
+          <circle cx={cx} cy={cy} r={r} fill={color} />
+        </svg>
+      </div>
       <div>
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>{label}</div>
         <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>{pct}%</div>
@@ -59,9 +61,13 @@ export default function KriteriaNgChart({ data, mainSize = 200, miniSize = 62 })
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 28 }}>
-      <div className="kng-chart-wrap" style={{ position: 'relative', flexShrink: 0 }}>
-        <svg width={mainSize} height={mainSize} viewBox={`0 0 ${mainSize} ${mainSize}`}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap', minWidth: 0 }}>
+      {/* Sama fix dengan JenisProblemChart/ArClusterDonut -- width/height
+          SVG dulu fixed px = mainSize, overflow lalu terpotong
+          .card{overflow:hidden} kalau kartunya lebih sempit. minWidth
+          jadi batas bawah supaya tidak ikut menyusut tanpa batas. */}
+      <div className="kng-chart-wrap" style={{ position: 'relative', flexShrink: 0, width: mainSize, maxWidth: '100%', minWidth: Math.max(90, mainSize * 0.5), aspectRatio: '1' }}>
+        <svg width="100%" height="100%" viewBox={`0 0 ${mainSize} ${mainSize}`}>
           <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(150,155,165,.28)" strokeWidth={strokeW} />
           {slices.map((s) => (
             <circle
