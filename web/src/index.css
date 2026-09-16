@@ -318,7 +318,7 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
   .rc-grouphead-grid{grid-template-columns:1fr}
 }
 
-/* Header teal "Resume Control Harian Produksi": judul di tengah lewat
+/* Header teal "Input Laporan Harian Produksi": judul di tengah lewat
    flex (tombol menu kiri & jam kanan sama-sama lebar 170px supaya area
    tengah benar-benar center). Di layar HP 170px+170px dari kedua sisi
    plus judul yang whiteSpace:nowrap tidak muat lagi, jadi judul
@@ -1014,5 +1014,24 @@ textarea.form-input{resize:vertical;min-height:64px}
 .shell.pres-mode .app-sidebar{display:none !important}
 .pres-fab{position:fixed;bottom:20px;right:20px;z-index:999;background:rgba(10,10,18,.75);backdrop-filter:blur(6px);border:1px solid var(--border);border-radius:8px;padding:8px 14px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:6px;font-size:11px;font-family:var(--font);transition:all .15s}
 .pres-fab:hover{color:var(--text);background:rgba(30,30,46,.9)}
+/* Tombol melayang ke /lhp (Resume Control Harian Produksi / Laporan Hasil
+   Produksi) -- dulu item menu biasa di sidebar, dipindah ke sini supaya
+   selalu kelihatan dari halaman admin mana pun tanpa numpang di rail
+   sidebar (lihat catatan di Topbar.jsx NAV_ITEMS). Disembunyikan saat
+   presentMode (.pres-fab yang tampil di mode itu) lewat kondisi render di
+   App.jsx, bukan CSS, supaya konsisten dengan pola pres-fab yang sudah ada. */
+.lhp-fab{
+  position:fixed;bottom:20px;right:20px;z-index:999;
+  width:52px;height:52px;border-radius:50%;
+  background:var(--accent);color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 6px 20px rgba(0,0,0,.28);
+  text-decoration:none;cursor:pointer;
+  transition:transform .15s ease,box-shadow .15s ease;
+}
+.lhp-fab:hover{transform:scale(1.06);box-shadow:0 8px 24px rgba(0,0,0,.35)}
+@media(max-width:767px){
+  .lhp-fab{bottom:calc(var(--bottomnav-h) + 12px);width:48px;height:48px}
+}
 /* Fix InfoTip z-index: hovered KPI card rises above siblings */
 .kpi-card:hover{z-index:10}

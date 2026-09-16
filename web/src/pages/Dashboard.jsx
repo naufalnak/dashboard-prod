@@ -82,7 +82,7 @@ export default function Dashboard() {
           onClick={() => navigate('overtimedetail')} />
         <GaugeCard title="Improvement (SS)" comingSoon infoText="Suggestion System — menunggu sumber data usulan karyawan." />
         <GaugeCard title="Improvement (QCC)" comingSoon infoText="Quality Control Circle — menunggu sumber data." />
-        <GaugeCard title="Otomation" comingSoon infoText="Menunggu sumber data proyek otomasi." />
+        <GaugeCard title="Automation" comingSoon infoText="Menunggu sumber data proyek otomasi." />
         <GaugeCard title="Matrix Skill" comingSoon infoText="Menunggu sumber data kompetensi karyawan." />
       </div>
     </div>
