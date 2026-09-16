@@ -1022,16 +1022,17 @@ textarea.form-input{resize:vertical;min-height:64px}
    App.jsx, bukan CSS, supaya konsisten dengan pola pres-fab yang sudah ada. */
 .lhp-fab{
   position:fixed;bottom:20px;right:20px;z-index:999;
-  width:52px;height:52px;border-radius:50%;
+  height:48px;border-radius:99px;padding:0 20px 0 16px;
   background:var(--accent);color:#fff;
-  display:flex;align-items:center;justify-content:center;
+  display:flex;align-items:center;gap:8px;
+  font-size:13px;font-weight:700;font-family:var(--font);white-space:nowrap;
   box-shadow:0 6px 20px rgba(0,0,0,.28);
   text-decoration:none;cursor:pointer;
   transition:transform .15s ease,box-shadow .15s ease;
 }
-.lhp-fab:hover{transform:scale(1.06);box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.lhp-fab:hover{transform:scale(1.04);box-shadow:0 8px 24px rgba(0,0,0,.35)}
 @media(max-width:767px){
-  .lhp-fab{bottom:calc(var(--bottomnav-h) + 12px);width:48px;height:48px}
+  .lhp-fab{bottom:calc(var(--bottomnav-h) + 12px);height:44px;padding:0 16px 0 13px;font-size:12.5px}
 }
 /* Fix InfoTip z-index: hovered KPI card rises above siblings */
 .kpi-card:hover{z-index:10}

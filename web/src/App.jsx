@@ -81,7 +81,7 @@ function Shell() {
           className="lhp-fab" href="/lhp" target="_blank" rel="noopener noreferrer"
           title="Input Laporan Hasil Produksi (RC Harian Produksi)"
         >
-          <Plus size={24} />
+          <Plus size={20} /> <span>Input LHP</span>
         </a>
       )}
     </>
