@@ -27,6 +27,19 @@ export function canSeeMachinesPage(username) {
   return MACHINES_PAGE_USERNAMES.includes(String(username || '').toLowerCase());
 }
 
+// Tab "Part Name & Proses" di Master Data dikunci di belakang password
+// login sendiri (lihat PartProsesLock.jsx) -- SENGAJA lebih sempit dari
+// PRIVILEGED_USERNAMES (mis. akun "123" privileged tapi TIDAK termasuk di
+// sini), jadi butuh daftar & helper sendiri, sama pola dengan
+// MACHINES_PAGE_USERNAMES. Ditegakkan juga di backend lewat
+// POST /unlock-part-proses (src/routes/auth.routes.js), bukan cuma
+// tampilan -- tab ini disembunyikan sama sekali dari akun lain.
+const PART_PROSES_USERNAMES = ['sugeng', 'pradana', 'djk'];
+
+export function canAccessPartProses(username) {
+  return PART_PROSES_USERNAMES.includes(String(username || '').toLowerCase());
+}
+
 export function isPrivilegedUser(username) {
   return PRIVILEGED_USERNAMES.includes(String(username || '').toLowerCase());
 }

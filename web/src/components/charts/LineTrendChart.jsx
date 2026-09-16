@@ -122,10 +122,17 @@ function ChartCanvas({
     // dibiarkan dibagi rata lewat CSS (align-items:center di .trend-wrap,
     // lihat index.css) supaya tidak menumpuk semua di bawah tanpa perlu
     // kanvas ikut membesar.
-    const H      = 130 + (rotate ? 28 : 0);
+    const H      = 226 + (rotate ? 28 : 0);
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
-    const pad = { t: 10, b: padB, l: padL, r: 4 };
+    // pad.t dinaikkan dari 10 -- kasih ruang buat label nilai di ATAS
+    // tiap bar (lihat blok "Label nilai" di bawah), supaya tidak
+    // terpotong pas bar-nya sendiri sudah mepet ke gridline paling atas
+    // (mis. AR 99-100%, sering kejadian). Lebih tinggi dari sebelumnya
+    // (22 -> 48) karena label sekarang teks VERTIKAL (mis. "99,8" berdiri
+    // ke atas ~4 karakter), butuh ruang jauh lebih tinggi drpd label
+    // horizontal satu baris.
+    const pad = { t: 48, b: padB, l: padL, r: 4 };
     const iW  = W - pad.l - pad.r;
     const iH  = H - pad.t - pad.b;
 
@@ -217,6 +224,33 @@ function ChartCanvas({
           ctx.lineTo(x + barW, pad.t + iH); ctx.lineTo(x, pad.t + iH);
           ctx.closePath(); ctx.fill();
         }
+      });
+
+      // Label nilai per bar (mis. "99,8", tanpa simbol satuan, TANPA
+      // dibulatkan -- angka asli apa adanya cuma diformat 1 desimal +
+      // koma ala Indonesia) -- SELALU ditampilkan langsung di grafik
+      // (bukan cuma pas hover, itu punya crosshair/tooltip sendiri di
+      // bawah), diletakkan di ATAS tiap bar, ARAH TEKS VERTIKAL (dibaca
+      // dari bawah ke atas) -- lebar yang dibutuhkan teks vertikal cuma
+      // setinggi font-nya sendiri (~10px), bukan selebar teksnya, jadi
+      // muat ditampilkan di SEMUA bar walau tampilan padat (mis. bulanan
+      // ~30 bar) tanpa saling tumpang tindih.
+      ctx.font = '700 10px Inter, sans-serif';
+      const labelStep = Math.max(1, Math.ceil(11 / slotW));
+      ctx.fillStyle = resolvedColor;
+      vals.forEach((v, i) => {
+        if (!v) return;
+        if (i % labelStep !== 0 && i !== m - 1) return;
+        const label = v.toFixed(1).replace('.', ',');
+        const cx = xOf(i) + barW / 2;
+        const topY = yOf(v);
+        ctx.save();
+        ctx.translate(cx, Math.max(14, topY - 4));
+        ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
       });
 
       // Target line — dashed, polos tanpa dot marker (dot cuma muncul saat hover)

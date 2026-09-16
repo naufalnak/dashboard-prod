@@ -2,13 +2,14 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Upload } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.jsx';
 import { useUI } from '../../contexts/UIContext.jsx';
-import { isReadOnlyUser } from '../../roles.js';
+import { isReadOnlyUser, canAccessPartProses } from '../../roles.js';
 import { apiFetch, apiSendForm } from '../../api.js';
 import { useToast } from '../../contexts/ToastContext.jsx';
 import { CLUSTERS } from './shared.jsx';
 import RingkasanTab from './RingkasanTab.jsx';
 import GroupHeadTab from './GroupHeadTab.jsx';
 import PartProsesTab from './PartProsesTab.jsx';
+import PartProsesLock from './PartProsesLock.jsx';
 import KriteriaNgTab from './KriteriaNgTab.jsx';
 import OvertimeTargetTab from './OvertimeTargetTab.jsx';
 import ShiftHoursTab from './ShiftHoursTab.jsx';
@@ -25,6 +26,15 @@ const TABS = [
 export default function MasterData() {
   const { logout, username } = useAuth();
   const readOnly = isReadOnlyUser(username);
+  const canPartProses = canAccessPartProses(username);
+  // Tetap terkunci sampai password login berhasil diverifikasi ulang lewat
+  // POST /unlock-part-proses (lihat PartProsesLock.jsx) -- reset tiap
+  // halaman ini dimuat ulang (state React biasa, sengaja TIDAK disimpan
+  // ke localStorage/sessionStorage supaya kuncinya benar-benar berarti).
+  const [partProsesUnlocked, setPartProsesUnlocked] = useState(false);
+  // Tab ini disembunyikan sama sekali dari akun di luar
+  // PART_PROSES_USERNAMES (lihat roles.js) -- bukan cuma dikunci.
+  const visibleTabs = useMemo(() => TABS.filter((t) => t.key !== 'partProses' || canPartProses), [canPartProses]);
   const { masterDataTab, setMasterDataTab } = useUI();
   const showToast = useToast();
   const [tab, setTab] = useState('ringkasan');
@@ -116,7 +126,7 @@ export default function MasterData() {
       )}
 
       <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--border)' }}>
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)}
             style={{
               padding: '9px 16px', fontSize: 13, fontWeight: tab === t.key ? 700 : 400,
@@ -138,10 +148,22 @@ export default function MasterData() {
         />
       )}
       {tab === 'partProses' && (
-        <PartProsesTab
-          proses={master.proses} partNames={master.partNames}
-          loading={loading} onChanged={load} logout={logout} legacy={legacy} readOnly={readOnly}
-        />
+        !canPartProses ? (
+          // Bisa kejangkau lewat navigateToPartProses dari halaman Validasi
+          // Data (akun apa pun boleh buka Validasi Data) -- akun yang bukan
+          // PART_PROSES_USERNAMES ditahan di sini, bukan cuma disembunyikan
+          // tombol tabnya.
+          <div className="card" style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+            Akun ini tidak punya akses ke Part Name & Proses.
+          </div>
+        ) : !partProsesUnlocked ? (
+          <PartProsesLock onUnlocked={() => setPartProsesUnlocked(true)} />
+        ) : (
+          <PartProsesTab
+            proses={master.proses} partNames={master.partNames}
+            loading={loading} onChanged={load} logout={logout} legacy={legacy} readOnly={readOnly}
+          />
+        )
       )}
       {tab === 'kriteriaNg' && (
         <KriteriaNgTab data={master.kriteriaNg} loading={loading} onChanged={load} logout={logout} readOnly={readOnly} />

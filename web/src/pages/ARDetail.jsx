@@ -16,8 +16,12 @@ import { SkeletonCircle, SkeletonBlock, SkeletonRows } from '../components/Skele
 import { useSort } from '../useSort.js';
 import { formatDateID } from '../dateFmt.js';
 
-const MAIN_SIZE = 200;
-const MINI_SIZE = 62;
+// Diperkecil dari 200/62 -- kartu AR & Jenis Problem sekarang disamakan
+// tinggi alaminya dengan "5 Line Produksi AR Tertinggi" (lihat baris
+// row4 di bawah), donut yang lebih kecil ini muat tanpa bikin kartunya
+// jadi lebih tinggi dari yang dituju.
+const MAIN_SIZE = 150;
+const MINI_SIZE = 48;
 const AR_OK_THRESHOLD = 90; // di bawah ini ring diwarnai merah -- sinyal "kurang baik"
 const CLUSTERS = ['AD', 'BC', 'EF', 'FI'];
 
@@ -144,7 +148,14 @@ export default function ARDetail() {
         </div>
       </div>
 
-      <div className="row4" style={{ gridTemplateColumns: '0.95fr 0.95fr 1.3fr', marginBottom: 16, alignItems: 'stretch' }}>
+      {/* AR & Jenis Problem -- dua donut ini SENGAJA dipisah dari Tren AR
+          (dulu satu baris bertiga dengan alignItems:'stretch', bikin dua
+          kartu donut ini ikut diregangkan setinggi Tren AR walau isinya
+          jauh lebih pendek). Sekarang disamakan tinggi alaminya dengan
+          "5 Line Produksi AR Tertinggi" di baris bawah -- donutnya sendiri
+          sudah responsif (lihat ArClusterDonut/JenisProblemChart), jadi
+          otomatis menyusut mengikuti kartu yang lebih pendek ini. */}
+      <div className="row4" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 16, alignItems: 'stretch' }}>
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-header"><div className="card-title">AR {filterSuffix}</div></div>
           {loading ? (
@@ -187,6 +198,13 @@ export default function ARDetail() {
           )}
         </div>
 
+      </div>
+
+      {/* Tren AR -- baris sendiri, lebar penuh, supaya blok grafiknya
+          benar-benar lega (bukan numpang sepertiga lebar bareng dua
+          donut) dan label nilai per bar (lihat LineTrendChart) dapat
+          ruang yang cukup. */}
+      <div className="row4" style={{ gridTemplateColumns: '1fr', marginBottom: 16 }}>
         <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-header">
             <div className="card-title">Tren AR {filterSuffix}</div>
